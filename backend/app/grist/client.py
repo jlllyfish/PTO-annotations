@@ -147,6 +147,13 @@ class GristClient:
             await self._req("POST", f"/tables/{table}/records", json={"records": lot})
         return len(lignes)
 
+    async def supprimer(self, table: str, ids: Sequence[int]) -> int:
+        ident(table)
+        ids = [int(i) for i in ids]
+        for i in range(0, len(ids), LOT_ECRITURE):
+            await self._req("POST", "/apply", json=[["BulkRemoveRecord", table, ids[i : i + LOT_ECRITURE]]])
+        return len(ids)
+
     async def maj(self, table: str, lignes: Sequence[dict[str, Any]]) -> int:
         """Mise à jour par identifiant de ligne Grist : [{"id": 12, "fields": {...}}, …]."""
         ident(table)

@@ -208,3 +208,13 @@ async def envoyer_file(dn: DNClient, grist: GristClient, d: DemarcheConfig, *, c
             await grist.maj(JOURNAL, [{"id": i, "fields": {"statut": "erreur", "message": str(exc)}}
                                       for ids in lignes.values() for i in ids])
     return bilans
+
+
+async def vider_journal(grist: GristClient, d: DemarcheConfig, *, cle_schema: str) -> int:
+    """Supprime les entrées TRAITÉES du journal de la démarche ; les opérations en attente sont conservées."""
+    await assurer_schema(grist, cle_schema)
+    rows = await grist.sql(
+        f'SELECT id FROM "{JOURNAL}" WHERE demarche = ? AND statut != ?',  # noqa: S608  # nosec B608 (constante)
+        [d.numero, "en_attente"],
+    )
+    return await grist.supprimer(JOURNAL, [r["id"] for r in rows]) if rows else 0

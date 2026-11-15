@@ -52,7 +52,7 @@ body { margin: 0; background: #fff; }
 .lbl-etat-des-lieux { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 
 /* Personnaliser le tableau */
-.lbl-personnaliser { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1.5rem 2.5rem;
+.lbl-personnaliser { display: grid; grid-template-columns: minmax(18rem, 26rem) minmax(0, 1fr); gap: 1.5rem 2.5rem;
   padding: 1.25rem 1.5rem; border: 1px solid var(--border-default-grey); }
 .lbl-personnaliser__col { display: flex; flex-direction: column; gap: 0.5rem; }
 .lbl-personnaliser__col > * { margin: 0; }
@@ -63,7 +63,8 @@ body { margin: 0; background: #fff; }
 .lbl-ordre__actions { display: flex; align-items: center; }
 .lbl-btn-icone { width: 2rem; min-height: 2rem; padding: 0; justify-content: center; }
 .lbl-btn-icone--vide { display: inline-block; }
-.lbl-colonnes { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); margin: 0; }
+/* Colonnes disponibles réparties sur 2 à 3 colonnes selon la largeur */
+.lbl-colonnes { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 0 1.5rem; margin: 0; }
 .lbl-colonnes .fr-fieldset__element { margin-bottom: 0.25rem; }
 
 /* Barre de sélection + tableau (modèle DN) */
@@ -190,3 +191,4 @@ button.fr-tag.lbl-c--yellow-tournesol[aria-pressed=true]:not(:disabled) { backgr
 .lbl-tableau td > .fr-link, .lbl-tableau td.lbl-nowrap { white-space: nowrap; }
 .lbl-personnaliser__pied { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 1rem;
   flex-wrap: wrap; padding-top: 1rem; border-top: 1px solid var(--border-default-grey); }
+@media (max-width: 48em) { .lbl-personnaliser { grid-template-columns: 1fr; } }

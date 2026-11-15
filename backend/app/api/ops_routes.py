@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..dn.client import Action
-from ..ops.service import LabelInconnu, apercu, envoyer_file, executer, mettre_en_file
+from ..ops.service import LabelInconnu, apercu, envoyer_file, executer, mettre_en_file, vider_journal
 from .routes import Qui, client_dn, demarche_de
 
 router = APIRouter()
@@ -65,3 +65,11 @@ async def route_envoyer_file(request: Request, qui: Qui, numero: Num) -> dict:
     async with qui.grist(request.app.state.grist_transport) as grist:
         bilans = await envoyer_file(client_dn(request, d), grist, d, cle_schema=qui.document.grist_doc_id)
     return {"lots": [asdict(b) for b in bilans]}
+
+
+@router.post("/api/demarches/{numero}/operations/journal/vider")
+async def route_vider_journal(request: Request, qui: Qui, numero: Num) -> dict:
+    d = demarche_de(qui, numero)
+    async with qui.grist(request.app.state.grist_transport) as grist:
+        n = await vider_journal(grist, d, cle_schema=qui.document.grist_doc_id)
+    return {"supprimees": n}

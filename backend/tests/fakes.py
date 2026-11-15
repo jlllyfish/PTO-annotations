@@ -78,6 +78,12 @@ class FakeGrist:
         self.ecritures.append(("ajouter", table, len(lignes)))
         return len(lignes)
 
+    async def supprimer(self, table, ids):
+        for i in ids:
+            self.db.execute(f'DELETE FROM "{table}" WHERE id = ?', [i])
+        self.ecritures.append(("supprimer", table, len(ids)))
+        return len(ids)
+
     async def maj(self, table, lignes):
         for l in lignes:
             sets = ", ".join(f'"{k}" = ?' for k in l["fields"])

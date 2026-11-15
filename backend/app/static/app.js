@@ -32,6 +32,7 @@ const ICONES = {
   haut: "M13 7.83V20h-2V7.83l-5.36 5.36-1.42-1.41L12 4l7.78 7.78-1.42 1.41z",
   bas: "M13 16.17V4h-2v12.17l-5.36-5.36-1.42 1.41L12 20l7.78-7.78-1.42-1.41z",
   fermer: "M12 10.59l4.95-4.95 1.41 1.41L13.41 12l4.95 4.95-1.41 1.41L12 13.41l-4.95 4.95-1.41-1.41L10.59 12 5.64 7.05l1.41-1.41L12 10.59z",
+  corbeille: "M17 6h5v2h-2v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8H2V6h5V3a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v3zm1 2H6v12h12V8zm-9 3h2v6H9v-6zm4 0h2v6h-2v-6zM9 4v2h6V4H9z",
   relire: "M12 2c5.52 0 10 4.48 10 10s-4.48 10-10 10S2 17.52 2 12h2a8 8 0 1 0 2.34-5.66L8.5 8.5H2.5v-6l2.42 2.42A9.96 9.96 0 0 1 12 2zm1 5v4.59l3.2 3.2-1.41 1.42L11 12.41V7h2z",
   externe: "M10 6v2H5v11h11v-5h2v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6zm11-3v8h-2V6.41l-7.79 7.8-1.42-1.42L17.59 5H13V3h8z",
 };
@@ -634,7 +635,28 @@ function modale() {
   const m = S.modal;
   if (!m) return null;
   let titre, corps, actions;
-  if (m.type === "retrait") {
+  if (m.type === "vider") {
+    const traitees = S.journal.filter((l) => l.statut !== "en_attente").length;
+    const attente = S.journal.length - traitees;
+    titre = "Vider le journal";
+    corps = [
+      h("p", {}, "Supprimer ", h("strong", { text: pluriel(traitees, "entrée traitée", "entrées traitées") }),
+        ` du journal de la démarche ${S.demarche} ?`),
+      h("p", { class: "lbl-mention", text: attente
+        ? `${pluriel(attente, "opération en attente est conservée", "opérations en attente sont conservées")}. Les labels dans DN ne changent pas.`
+        : "Les labels dans DN ne changent pas." }),
+      alerte("info", null, "La suppression reste visible dans l'historique du document Grist."),
+    ];
+    actions = [bouton("Annuler", fermerModal, { type: "secondary" }),
+      bouton("Vider le journal", () => {
+        S.modal = null;
+        action(async () => {
+          const r = await api("POST", `${base()}/operations/journal/vider`);
+          S.message = { type: "success", titre: "Journal vidé", texte: `${pluriel(r.supprimees, "entrée supprimée", "entrées supprimées")}.` };
+          await chargerJournal();
+        });
+      })];
+  } else if (m.type === "retrait") {
     titre = "Retirer un label";
     corps = [h("p", {}, "Retirer le label ", h("span", { class: `fr-tag fr-tag--sm ${classeCouleur(m.label.color)}`, text: m.label.name }),
       ` du dossier ${m.num} ?`),
@@ -708,7 +730,9 @@ function vueFile() {
             texte: `${t.a} appliquée(s) · ${t.d} déjà dans l'état voulu · ${t.e} erreur(s)` };
           await chargerJournal();
         }), { disabled: !attente }),
-        bouton("Actualiser", () => action(chargerJournal), { type: "tertiary", ic: "verifier" })),
+        bouton("Actualiser", () => action(chargerJournal), { type: "tertiary", ic: "verifier" }),
+        bouton("Vider le journal", () => { S.modal = { type: "vider" }; rendu(); },
+          { type: "tertiary", ic: "corbeille", disabled: !S.journal.some((l) => l.statut !== "en_attente") })),
       h("div", { class: "fr-input-group fr-mb-0 lbl-champ" },
         h("label", { class: "fr-label lbl-cache", for: idRech, text: "Filtrer par n° de dossier" }),
         h("input", { class: "fr-input", type: "search", id: idRech, placeholder: "N° de dossier", value: S.rechercheJournal,

@@ -1,7 +1,7 @@
 import pytest
 
 from app.dn.client import Action
-from app.ops.service import LabelInconnu, apercu, envoyer_file, executer, mettre_en_file
+from app.ops.service import LabelInconnu, apercu, envoyer_file, executer, mettre_en_file, vider_journal
 from app.sync import schema
 
 from .fakes import FakeDN, FakeGrist
@@ -82,3 +82,14 @@ async def test_file_puis_envoi():
     assert {r["statut"] for r in g.rows("LBL_Operations")} == {"applique"}
     assert len(g.rows("LBL_Operations")) == 3                       # mises à jour, pas de doublons
     assert await envoyer_file(dn, g, D, cle_schema="doc") == []     # file vide
+
+
+@pytest.mark.anyio
+async def test_vider_journal_conserve_la_file():
+    g, dn = setup()
+    await executer(dn, g, D, Action.AJOUTER, "LA", [1, 2], source="manuel", cle_schema="doc")
+    await mettre_en_file(dn, g, D, Action.AJOUTER, "LU", [3], source="manuel", cle_schema="doc")
+    g.db.execute('''INSERT INTO "LBL_Operations" (demarche, dossier_number, statut) VALUES (999, "7", "applique")''')
+    assert await vider_journal(g, D, cle_schema="doc") == 2
+    restant = {(r["demarche"], r["statut"]) for r in g.rows("LBL_Operations")}
+    assert restant == {(149930, "en_attente"), (999, "applique")}   # file et autres démarches intactes

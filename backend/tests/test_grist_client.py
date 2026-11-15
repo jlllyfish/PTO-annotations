@@ -53,3 +53,14 @@ async def test_erreur_grist():
             await g.sql("DELETE FROM x")
     assert e.value.status == 400
     assert TOKEN not in str(e.value)
+
+
+@pytest.mark.anyio
+async def test_supprimer_par_lots():
+    rec = Recorder(lambda r: httpx.Response(200, json={}))
+    async with GristClient.par_jeton(BASE, TOKEN, transport=rec.transport()) as g:
+        assert await g.supprimer("LBL_Operations", list(range(1, 1101))) == 1100
+    assert [b[0][0] for b in rec.bodies()] == ["BulkRemoveRecord"] * 3
+    assert [len(b[0][2]) for b in rec.bodies()] == [500, 500, 100]
+    with pytest.raises(ValueError):
+        await GristClient.par_jeton(BASE, TOKEN).supprimer('x"; --', [1])
