@@ -30,6 +30,12 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
+class JSONUtf8(JSONResponse):
+    """Précise le charset : PowerShell 5 lit sinon les accents en ISO-8859-1."""
+
+    media_type = "application/json; charset=utf-8"
+
+
 class FabriqueDN:
     """Un client DN (et son pool de connexions) par jeton configuré, créé à la demande."""
 
@@ -69,6 +75,7 @@ def create_app(
     app = FastAPI(
         title="Labels DN ↔ Grist",
         lifespan=lifespan,
+        default_response_class=JSONUtf8,
         docs_url="/docs" if debug else None,
         redoc_url=None,
         openapi_url="/openapi.json" if debug else None,
@@ -97,7 +104,7 @@ def create_app(
     async def securite(request: Request, call_next):
         longueur = request.headers.get("content-length")
         if longueur and (not longueur.isdigit() or int(longueur) > MAX_BODY):
-            return JSONResponse({"detail": "Requête trop volumineuse"}, status_code=413)
+            return JSONUtf8({"detail": "Requête trop volumineuse"}, status_code=413)
         response = await call_next(request)
         widget = request.url.path.startswith("/widget")
         h = response.headers
@@ -114,12 +121,12 @@ def create_app(
     @app.exception_handler(DNError)
     async def _dn(_req: Request, exc: DNError) -> JSONResponse:
         logging.getLogger("dn").warning("Erreur DN : %s (request-id %s)", exc, exc.request_id)
-        return JSONResponse({"detail": str(exc), "source": "dn", "request_id": exc.request_id}, status_code=502)
+        return JSONUtf8({"detail": str(exc), "source": "dn", "request_id": exc.request_id}, status_code=502)
 
     @app.exception_handler(GristError)
     async def _grist(_req: Request, exc: GristError) -> JSONResponse:
         logging.getLogger("grist").warning("Erreur Grist : %s", exc)
-        return JSONResponse({"detail": str(exc), "source": "grist"}, status_code=502)
+        return JSONUtf8({"detail": str(exc), "source": "grist"}, status_code=502)
 
     app.include_router(router)
     app.include_router(sync_router)

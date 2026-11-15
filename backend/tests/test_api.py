@@ -27,6 +27,7 @@ def test_health_et_entetes(api):
     assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
     assert r.headers["x-content-type-options"] == "nosniff"
     assert r.headers["cache-control"] == "no-store"
+    assert r.headers["content-type"] == "application/json; charset=utf-8"
 
 
 def test_widget_csp(api):
