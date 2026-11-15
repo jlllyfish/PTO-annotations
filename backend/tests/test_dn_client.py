@@ -57,12 +57,14 @@ async def test_relecture_complete_par_etat_dedoublonnee():
 async def test_lecture_ciblee_par_lots_de_25():
     def h(req):
         v = json.loads(req.content)["variables"]
-        data = {f"d{k[1:]}": node(n) for k, n in v.items() if n != 999}
+        assert "demarche { number }" in json.loads(req.content)["query"]
+        data = {f"d{k[1:]}": {**node(n), "demarche": {"number": 777 if n == 5 else 149930}} for k, n in v.items() if n != 999}
         return httpx.Response(200, json={"data": data})
     dn, rec = client(h)
-    res = await dn.dossiers(list(range(1, 30)) + [999, 1])
+    res = await dn.dossiers(list(range(1, 30)) + [999, 1], 149930)
     assert len(rec.requests) == 2
-    assert sorted(d.numero for d in res) == list(range(1, 30))  # 999 introuvable ignoré, doublon retiré
+    # 999 introuvable, 5 appartient à une autre démarche, doublon retiré
+    assert sorted(d.numero for d in res) == [n for n in range(1, 30) if n != 5]
 
 
 @pytest.mark.anyio

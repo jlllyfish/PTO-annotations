@@ -41,6 +41,29 @@ Ou avec Docker : `docker compose up --build` (mêmes fichiers `demarches.yaml` e
 - Seules les lignes dont les labels ont changé sont réécrites, au **format exact d'OTP** (`label_names`, `labels_json`).
 - Tables créées automatiquement : `LBL_Catalogue` (labels de la démarche), `LBL_Etat` (une ligne par démarche).
 
+## Widget et opérations (phases 3 et 4)
+
+Dans Grist : **Ajouter une vue › Personnalisé**, données = `Demarche_<n>_dossiers`, URL `http://localhost:8000/widget/`,
+accès **complet au document**. Onglets :
+
+- **Dossier** : labels du dossier sélectionné, ajout / retrait immédiat dans DN, vérification DN, historique.
+- **En masse** : sur les dossiers transmis au widget (filtres de sa vue, 500 max), aperçu calculé sur l'état
+  réel de DN, confirmation obligatoire, ou mise en file sans envoi.
+- **File et journal** : table `LBL_Operations` (une ligne par dossier et opération), envoi de la file.
+- **Synchro** : incrémentale, ciblée sur les dossiers transmis, complète ; catalogue des labels.
+- **Règles** : phase 5.
+
+| Route | Rôle |
+|---|---|
+| `POST /api/demarches/{n}/operations/apercu` | ce que ferait l'envoi, d'après DN |
+| `POST /api/demarches/{n}/operations` `{"action", "label_id", "numeros", "envoyer"}` | envoi immédiat ou mise en file |
+| `POST /api/demarches/{n}/operations/file/envoyer` | envoi des opérations en attente |
+
+Garde-fous : label vérifié dans le catalogue DN ; dossiers d'une **autre démarche** écartés (un jeton DN peut en
+couvrir plusieurs) ; aucun appel DN pour un dossier déjà dans l'état voulu ; Grist mis à jour d'après la réponse de DN.
+
+Le DSFR (CSS, police Marianne, icônes utiles) est auto-hébergé dans `app/static/dsfr/` (version dans `VERSION`).
+
 ## Qualité et sécurité
 
 ```powershell

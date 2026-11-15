@@ -21,6 +21,12 @@ TABLES: dict[str, list[tuple[str, str]]] = {
         # Début de la dernière synchro réussie (incrémentale ou complète) : point de départ de la suivante.
         ("curseur", DT), ("derniere_complete", DT),
     ],
+    # File d'attente ET journal : une ligne par (dossier, label, action)
+    "LBL_Operations": [
+        ("demarche", "Int"), ("dossier_number", "Text"), ("label_id", "Text"), ("label", "Text"),
+        ("action", "Text"), ("source", "Text"), ("statut", "Text"), ("message", "Text"),
+        ("cree_le", DT), ("traite_le", DT),
+    ],
 }
 
 # Colonnes OTP indispensables dans Demarche_<n>_dossiers

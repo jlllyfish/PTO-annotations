@@ -57,6 +57,7 @@ class DossierLabels:
     id: str
     labels: frozenset[str]
     modifie_le: str | None = None
+    demarche: int | None = None
 
 
 class Action(StrEnum):
@@ -124,7 +125,8 @@ def _query_lecture_ciblee(n: int) -> str:
     if not 1 <= n <= LOT_LECTURE:
         raise ValueError("taille de lot invalide")
     decl = ", ".join(f"$n{k}: Int!" for k in range(n))
-    body = " ".join(f"d{k}: dossier(number: $n{k}) {{ {_DOSSIER_FIELDS} }}" for k in range(n))
+    champs = f"{_DOSSIER_FIELDS} demarche {{ number }}"
+    body = " ".join(f"d{k}: dossier(number: $n{k}) {{ {champs} }}" for k in range(n))
     return f"query Cible({decl}) {{ {body} }}"
 
 
@@ -145,6 +147,7 @@ def _dossier(node: dict[str, Any]) -> DossierLabels:
         id=str(node["id"]),
         labels=frozenset(lbl["id"] for lbl in node.get("labels") or []),
         modifie_le=node.get("dateDerniereModification"),
+        demarche=(node.get("demarche") or {}).get("number"),
     )
 
 
@@ -265,13 +268,20 @@ class DNClient:
         parts = await asyncio.gather(*(flux(e) for e in ETATS))
         return list({d.numero: d for part in parts for d in part}.values())
 
-    async def dossiers(self, numeros: Sequence[int], on_page: Progres | None = None) -> list[DossierLabels]:
-        """Lecture ciblée par alias (lots de 25, en parallèle). Les numéros introuvables sont ignorés."""
+    async def dossiers(
+        self, numeros: Sequence[int], demarche: int, on_page: Progres | None = None
+    ) -> list[DossierLabels]:
+        """Lecture ciblée par alias (lots de 25, en parallèle).
+
+        Les numéros introuvables, ou appartenant à une AUTRE démarche que `demarche`, sont écartés :
+        un jeton DN peut couvrir plusieurs démarches, on ne laisse jamais agir hors périmètre.
+        """
 
         async def lot(nums: Sequence[int]) -> list[DossierLabels]:
             body = await self._post(_query_lecture_ciblee(len(nums)), {f"n{k}": n for k, n in enumerate(nums)})
             data = body.get("data") or {}
-            res = [_dossier(node) for k in range(len(nums)) if (node := data.get(f"d{k}"))]
+            lus = [_dossier(node) for k in range(len(nums)) if (node := data.get(f"d{k}"))]
+            res = [d for d in lus if d.demarche == demarche]
             if on_page:
                 on_page(len(res))
             return res

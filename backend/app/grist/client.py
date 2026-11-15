@@ -140,6 +140,13 @@ class GristClient:
             n += len(lot)
         return n
 
+    async def ajouter(self, table: str, lignes: Sequence[dict[str, Any]]) -> int:
+        ident(table)
+        for i in range(0, len(lignes), LOT_ECRITURE):
+            lot = [{"fields": l} for l in lignes[i : i + LOT_ECRITURE]]
+            await self._req("POST", f"/tables/{table}/records", json={"records": lot})
+        return len(lignes)
+
     async def maj(self, table: str, lignes: Sequence[dict[str, Any]]) -> int:
         """Mise à jour par identifiant de ligne Grist : [{"id": 12, "fields": {...}}, …]."""
         ident(table)

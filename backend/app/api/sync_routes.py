@@ -85,7 +85,9 @@ async def tache_planifiee(
                     return await synchroniser(dn, grist, d, Mode(mode), cle_schema=doc.grist_doc_id, progression=prog)
 
             try:
-                tache = await request.app.state.taches.executer(doc.grist_doc_id, d.numero, Mode(mode), "n8n", travail)
+                tache = await request.app.state.taches.executer(
+                    doc.grist_doc_id, d.numero, Mode(mode), "tache_planifiee", travail
+                )
                 resultats.append({"document": doc.grist_doc_id, "demarche": d.numero, **tache.vue()})
             except DejaEnCours as exc:
                 resultats.append({"document": doc.grist_doc_id, "demarche": d.numero, "statut": "ignoree",

@@ -113,7 +113,7 @@ async def _maj_catalogue(grist: GristClient, demarche: int, labels: list[Label])
         await grist.maj("LBL_Catalogue", retires)
 
 
-async def _lignes_grist(grist: GristClient, table: str, numeros: Sequence[str] | None) -> dict[str, dict[str, Any]]:
+async def lignes_grist(grist: GristClient, table: str, numeros: Sequence[str] | None) -> dict[str, dict[str, Any]]:
     # Seul l'identifiant de table est inséré dans le texte : validé par ident() (regex + guillemets) et
     # issu de la configuration. Les valeurs passent toutes en paramètres « ? ».
     t = ident(table)
@@ -163,7 +163,7 @@ async def synchroniser(
         if mode == Mode.CIBLEE:
             if not numeros:
                 raise ValueError("aucun numéro de dossier")
-            dossiers = await dn.dossiers(numeros, on_page=prog.lus)
+            dossiers = await dn.dossiers(numeros, n, on_page=prog.lus)
         elif mode == Mode.INCREMENTALE and etat and etat.get("curseur"):
             depuis = datetime.fromtimestamp(float(etat["curseur"]), UTC) - MARGE
             dossiers = await dn.dossiers_modifies(n, depuis, on_page=prog.lus)
@@ -174,7 +174,7 @@ async def synchroniser(
         prog.etape = "comparaison"
         bilan = Bilan(n, mode, dossiers_lus=len(dossiers), labels_catalogue=len(labels))
         cibles = None if mode == Mode.COMPLETE else [str(d.numero) for d in dossiers]
-        lignes = await _lignes_grist(grist, demarche.table, cibles) if dossiers else {}
+        lignes = await lignes_grist(grist, demarche.table, cibles) if dossiers else {}
 
         a_ecrire = []
         for d in dossiers:

@@ -72,3 +72,26 @@ def test_catalogue_demarche_hors_document(api):
 def test_corps_trop_gros(api):
     r = api.post("/api/contexte", headers={**AUTH, "Content-Length": str(10**7)}, content=b"x")
     assert r.status_code == 413
+
+
+@pytest.mark.parametrize("body", [
+    {"action": "ajouter", "label_id": "TGFiZWwtNTAzOTAy", "numeros": []},
+    {"action": "ajouter", "label_id": "TGFiZWwtNTAzOTAy", "numeros": list(range(1, 502))},
+    {"action": "supprimer", "label_id": "TGFiZWwtNTAzOTAy", "numeros": [1]},
+    {"action": "ajouter", "label_id": "x\"){ evil }", "numeros": [1]},
+    {"action": "ajouter", "label_id": "TGFiZWwtNTAzOTAy", "numeros": [1], "source": "regle"},
+])
+def test_operations_validation(api, body):
+    assert api.post("/api/demarches/149930/operations", headers=AUTH, json=body).status_code == 422
+    assert api.dn.requests == []
+
+
+def test_operations_sans_jeton(api):
+    body = {"action": "ajouter", "label_id": "TGFiZWwtNTAzOTAy", "numeros": [1]}
+    assert api.post("/api/demarches/149930/operations", json=body).status_code == 401
+
+
+def test_apercu_label_inconnu(api):
+    body = {"action": "ajouter", "label_id": "TGFiZWwtOTk5", "numeros": [1]}
+    r = api.post("/api/demarches/149930/operations/apercu", headers=AUTH, json=body)
+    assert r.status_code == 422 and "n'existe pas" in r.json()["detail"]

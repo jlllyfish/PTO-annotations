@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 
-from app.dn.client import DossierLabels, Label
+from app.dn.client import Action, DossierLabels, Label, Resultat, Statut
 from app.grist.client import Colonne, GristError, ident
 
 
@@ -71,6 +71,13 @@ class FakeGrist:
         self.ecritures.append(("upsert", table, len(lignes)))
         return len(lignes)
 
+    async def ajouter(self, table, lignes):
+        for l in lignes:
+            cols = ", ".join(f'"{k}"' for k in l)
+            self.db.execute(f'INSERT INTO "{table}" ({cols}) VALUES ({", ".join("?" * len(l))})', list(l.values()))
+        self.ecritures.append(("ajouter", table, len(lignes)))
+        return len(lignes)
+
     async def maj(self, table, lignes):
         for l in lignes:
             sets = ", ".join(f'"{k}" = ?' for k in l["fields"])
@@ -112,6 +119,19 @@ class FakeDN:
         modifies = getattr(self, "modifies", list(self.etat))
         return [self._d(n) for n in modifies]
 
-    async def dossiers(self, numeros, on_page=None):
+    async def dossiers(self, numeros, demarche, on_page=None):
         self.appels.append(("ciblee", tuple(numeros)))
-        return [self._d(n) for n in numeros if n in self.etat]
+        autres = getattr(self, "autre_demarche", set())
+        return [self._d(n) for n in dict.fromkeys(numeros) if n in self.etat and n not in autres]
+
+    async def appliquer(self, action, operations):
+        self.appels.append(("appliquer", action, len(operations)))
+        res = []
+        for op in operations:
+            n = int(op.dossier_id[1:])
+            if n in getattr(self, "en_erreur", set()):
+                res.append(Resultat(op, Statut.ERREUR, "Dossier archivé"))
+                continue
+            (self.etat[n].add if action == Action.AJOUTER else self.etat[n].discard)(op.label_id)
+            res.append(Resultat(op, Statut.APPLIQUE, labels_apres=frozenset(self.etat[n])))
+        return res
