@@ -74,7 +74,7 @@ body { margin: 0; background: var(--background-alt-grey, #f6f6f6); }
 /* Pastilles-filtres : pas de coche DSFR ; l'état actif est un anneau bleu France (aria-pressed reste lu). */
 .lbl-filtres button.fr-tag[aria-pressed]::after { content: none; display: none; }
 .lbl-filtres button.fr-tag[aria-pressed="true"]:not(:disabled) { background-image: none;
-  box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--border-active-blue-france, #000091); font-weight: 700; }
+  box-shadow: 0 0 0 2px var(--border-active-blue-france, #000091); font-weight: 700; }
 .lbl-filtres button.fr-tag:not([class*="lbl-c--"])[aria-pressed="true"]:not(:disabled) {
   background-color: var(--background-action-low-blue-france); color: var(--text-action-high-blue-france); }
 .lbl-filtre-actif { align-items: center; gap: 0.5rem; }
