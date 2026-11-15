@@ -657,6 +657,12 @@ function modale() {
 
 // ------------------------------------------------------------------ autres onglets
 
+// Couleur prise dans le catalogue DN actuel ; un label supprimé depuis reste affiché, en gris.
+function pastilleJournal(l) {
+  const c = S.catalogue.find((x) => x.id === l.label_id);
+  return h("span", { class: `fr-tag fr-tag--sm ${c ? classeCouleur(c.couleur) : ""}`, text: l.label || "?" });
+}
+
 function vueFile() {
   const filtres = [["toutes", "Toutes"], ["en_attente", "En attente"], ["applique", "Appliquées"], ["erreur", "Erreurs"]];
   const parNumero = S.journal.filter((l) => !S.rechercheJournal || String(l.dossier_number).includes(S.rechercheJournal));
@@ -685,7 +691,7 @@ function vueFile() {
       onclick: () => { S.filtreJournal = f; rendu(); },
     }, `${nom} (${compte(f)})`))),
     lignes.length
-      ? h("div", { class: "fr-table fr-table--bordered fr-table--multiline fr-mb-0" },
+      ? h("div", { class: "fr-table fr-table--bordered fr-table--multiline fr-mb-0 lbl-tableau" },
         h("div", { class: "fr-table__wrapper" }, h("div", { class: "fr-table__container" }, h("div", { class: "fr-table__content" },
           h("table", {},
             h("caption", { class: "lbl-cache", text: "Opérations sur les labels" }),
@@ -693,7 +699,7 @@ function vueFile() {
             h("tbody", {}, lignes.map((l) => h("tr", {},
               h("td", { text: String(l.dossier_number) }),
               h("td", { text: l.action === "ajouter" ? "Ajout" : "Retrait" }),
-              h("td", { text: l.label }),
+              h("td", {}, pastilleJournal(l)),
               h("td", { text: l.source }),
               h("td", {}, badge(...(STATUTS[l.statut] || [l.statut, ""])), l.message ? h("div", { class: "lbl-mention", text: l.message }) : null),
               h("td", { text: dateEpoch(l.traite_le || l.cree_le) })))))))))
@@ -712,7 +718,8 @@ function rendu() {
   compteurIds = 0; // identifiants stables d'un rendu à l'autre (restauration du focus)
   const vues = { dossiers: vueDossiers, file: vueFile, regles: vueRegles };
   const focus = document.activeElement && document.activeElement.id;
-  app.replaceChildren(
+  // replaceChildren écrirait « null » en texte : on ne passe que des nœuds
+  app.replaceChildren(...[
     enTete(),
     onglets(),
     h("main", { class: "lbl-main" },
@@ -722,7 +729,8 @@ function rendu() {
       etatSynchroEnCours(),
       vues[S.onglet]()),
     boutonHaut(),
-    modale());
+    modale(),
+  ].filter(Boolean));
   surveillerAncre();
   const cible = focus && document.getElementById(focus);
   if (cible) {
