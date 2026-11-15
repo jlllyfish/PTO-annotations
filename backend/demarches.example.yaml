@@ -7,6 +7,8 @@ grist_service_key: GRIST_SERVICE_KEY
 dn_api_url: https://demarche.numerique.gouv.fr/api/v2/graphql
 # Requêtes simultanées max vers DN (phase 0 : 4 est confortable)
 dn_concurrence: 4
+# Secret partagé avec n8n pour POST /api/taches/synchro (supprimer la ligne pour désactiver la route)
+task_token: LBL_TASK_TOKEN
 
 documents:
   - grist_doc_id: AbCdEfGh1234          # Paramètres du document Grist › API

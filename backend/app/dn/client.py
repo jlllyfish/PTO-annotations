@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -32,6 +32,9 @@ LOT_LECTURE = 25
 LOT_MUTATION = 50
 ETATS = ("en_construction", "en_instruction", "accepte", "refuse", "sans_suite")
 RETRY_STATUSES = {429, 502, 503, 504}
+
+
+Progres = Callable[[int], None]  # rappel « n dossiers lus » pour la barre de progression
 
 
 class DNError(RuntimeError):
@@ -228,42 +231,50 @@ class DNClient:
         data = await self._data(Q_CATALOGUE, {"n": demarche})
         return [Label(l["id"], l["name"], l["color"]) for l in data["demarche"]["labels"]]
 
-    async def _pages(self, query: str, variables: dict[str, Any]) -> AsyncIterator[list[DossierLabels]]:
+    async def _pages(self, query: str, variables: dict[str, Any],
+                     on_page: Progres | None = None) -> AsyncIterator[list[DossierLabels]]:
         after = None
         while True:
             data = await self._data(query, {**variables, "after": after})
             conn = data["demarche"]["dossiers"]
-            yield [_dossier(n) for n in conn["nodes"]]
+            page = [_dossier(n) for n in conn["nodes"]]
+            if on_page:
+                on_page(len(page))
+            yield page
             if not conn["pageInfo"]["hasNextPage"]:
                 return
             after = conn["pageInfo"]["endCursor"]
 
-    async def dossiers_modifies(self, demarche: int, depuis: datetime) -> list[DossierLabels]:
+    async def dossiers_modifies(self, demarche: int, depuis: datetime,
+                                on_page: Progres | None = None) -> list[DossierLabels]:
         """Synchro incrémentale : dossiers modifiés (labels compris) depuis `depuis`."""
         out: list[DossierLabels] = []
-        async for page in self._pages(Q_DOSSIERS, {"n": demarche, "since": depuis.isoformat()}):
+        async for page in self._pages(Q_DOSSIERS, {"n": demarche, "since": depuis.isoformat()}, on_page):
             out.extend(page)
         return out
 
-    async def tous_les_dossiers(self, demarche: int) -> list[DossierLabels]:
+    async def tous_les_dossiers(self, demarche: int, on_page: Progres | None = None) -> list[DossierLabels]:
         """Relecture complète, un flux par état en parallèle (dédoublonnée par numéro)."""
 
         async def flux(etat: str) -> list[DossierLabels]:
             res: list[DossierLabels] = []
-            async for page in self._pages(Q_DOSSIERS_ETAT, {"n": demarche, "state": etat}):
+            async for page in self._pages(Q_DOSSIERS_ETAT, {"n": demarche, "state": etat}, on_page):
                 res.extend(page)
             return res
 
         parts = await asyncio.gather(*(flux(e) for e in ETATS))
         return list({d.numero: d for part in parts for d in part}.values())
 
-    async def dossiers(self, numeros: Sequence[int]) -> list[DossierLabels]:
+    async def dossiers(self, numeros: Sequence[int], on_page: Progres | None = None) -> list[DossierLabels]:
         """Lecture ciblée par alias (lots de 25, en parallèle). Les numéros introuvables sont ignorés."""
 
         async def lot(nums: Sequence[int]) -> list[DossierLabels]:
             body = await self._post(_query_lecture_ciblee(len(nums)), {f"n{k}": n for k, n in enumerate(nums)})
             data = body.get("data") or {}
-            return [_dossier(node) for k in range(len(nums)) if (node := data.get(f"d{k}"))]
+            res = [_dossier(node) for k in range(len(nums)) if (node := data.get(f"d{k}"))]
+            if on_page:
+                on_page(len(res))
+            return res
 
         uniques = list(dict.fromkeys(int(n) for n in numeros))
         parts = await asyncio.gather(*(lot(c) for c in _chunks(uniques, LOT_LECTURE)))

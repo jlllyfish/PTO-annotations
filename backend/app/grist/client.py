@@ -110,6 +110,18 @@ class GristClient:
         body = await self._req("POST", "/sql", json={"sql": sql, "args": list(args), "timeout": 5000})
         return [r["fields"] for r in body.get("records", [])]
 
+    # ------------------------------------------------------------------ schéma
+
+    async def creer_table(self, table: str, colonnes: Sequence[tuple[str, str]]) -> None:
+        ident(table)
+        cols = [{"id": ident(c, kind="colonne") and c, "fields": {"type": t}} for c, t in colonnes]
+        await self._req("POST", "/tables", json={"tables": [{"id": table, "columns": cols}]})
+
+    async def ajouter_colonnes(self, table: str, colonnes: Sequence[tuple[str, str]]) -> None:
+        ident(table)
+        cols = [{"id": ident(c, kind="colonne") and c, "fields": {"type": t}} for c, t in colonnes]
+        await self._req("POST", f"/tables/{table}/columns", json={"columns": cols})
+
     # ------------------------------------------------------------------ écriture
 
     async def upsert(self, table: str, lignes: Sequence[dict[str, Any]], cles: Sequence[str]) -> int:

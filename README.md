@@ -28,6 +28,19 @@ uvicorn app.main:create_app --factory --port 8000
 
 Ou avec Docker : `docker compose up --build` (mêmes fichiers `demarches.yaml` et `.env`).
 
+## Synchronisation des labels (phase 2)
+
+| Route | Appelant | Rôle |
+|---|---|---|
+| `POST /api/demarches/{n}/synchro` `{"mode": "incrementale" \| "complete" \| "ciblee", "numeros": [...]}` | widget | lance en arrière-plan (202) |
+| `GET /api/demarches/{n}/synchro` | widget | progression + dernier résultat (`LBL_Etat`) |
+| `POST /api/taches/synchro?mode=incrementale\|complete` | n8n (`Authorization: Bearer <LBL_TASK_TOKEN>`) | synchro de toutes les démarches configurées |
+
+- **Incrémentale** : dossiers modifiés depuis la dernière synchro réussie (marge 2 min) ; complète s'il n'y en a jamais eu.
+- **Complète** : tous les dossiers (à planifier la nuit). **Ciblée** : jusqu'à 500 numéros, ne déplace pas le curseur.
+- Seules les lignes dont les labels ont changé sont réécrites, au **format exact d'OTP** (`label_names`, `labels_json`).
+- Tables créées automatiquement : `LBL_Catalogue` (labels de la démarche), `LBL_Etat` (une ligne par démarche).
+
 ## Qualité et sécurité
 
 ```powershell

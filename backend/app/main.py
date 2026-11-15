@@ -14,10 +14,12 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .api.routes import router
+from .api.sync_routes import router as sync_router
 from .config import AppConfig, get_config, read_secret
 from .dn.client import DNClient, DNError
 from .grist.client import GristError
 from .security import LimiteurDebit, VerificateurJetons
+from .sync.jobs import Taches
 
 STATIC = Path(__file__).parent / "static"
 MAX_BODY = 256 * 1024
@@ -76,6 +78,7 @@ def create_app(
     app.state.limiteur = LimiteurDebit()
     app.state.dn_clients = fabrique
     app.state.grist_transport = grist_transport
+    app.state.taches = Taches()
 
     if hosts := os.getenv("LBL_ALLOWED_HOSTS"):
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=[h.strip() for h in hosts.split(",")])
@@ -119,5 +122,6 @@ def create_app(
         return JSONResponse({"detail": str(exc), "source": "grist"}, status_code=502)
 
     app.include_router(router)
+    app.include_router(sync_router)
     app.mount("/widget", StaticFiles(directory=STATIC, html=True), name="widget")
     return app

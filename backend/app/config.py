@@ -83,6 +83,8 @@ class AppConfig(_Strict):
     grist_service_key: str = Field(default="GRIST_SERVICE_KEY", pattern=ENV_NAME_RE)
     dn_api_url: HttpUrl = HttpUrl("https://demarche.numerique.gouv.fr/api/v2/graphql")
     dn_concurrence: int = Field(default=4, ge=1, le=8)
+    # Secret partagé avec n8n pour déclencher les tâches de fond (route désactivée si absent)
+    task_token: str | None = Field(default=None, pattern=ENV_NAME_RE)
     documents: list[DocumentConfig] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -98,7 +100,8 @@ class AppConfig(_Strict):
         return next((d for d in self.documents if d.grist_doc_id == doc_id), None)
 
     def secrets_requis(self) -> set[str]:
-        return {self.grist_service_key} | {d.dn_token for doc in self.documents for d in doc.demarches}
+        noms = {self.grist_service_key} | {d.dn_token for doc in self.documents for d in doc.demarches}
+        return noms | ({self.task_token} if self.task_token else set())
 
 
 def load_config(path: str | Path, *, verifier_secrets: bool = True) -> AppConfig:
