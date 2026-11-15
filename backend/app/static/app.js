@@ -1,6 +1,6 @@
 "use strict";
 /*
- * Widget Grist « Labels DN ».
+ * Widget Grist « Labels DN » — interface calquée sur la liste des dossiers de Démarche Numérique.
  * Sécurité : aucun innerHTML — tout le DOM est construit avec createElement / textContent.
  * Le jeton Grist (getAccessToken) authentifie chaque appel au backend, qui le vérifie auprès de Grist.
  */
@@ -23,6 +23,25 @@ function h(tag, attrs, ...enfants) {
   return el;
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+const ICONES = {
+  plus: "M11 11V5h2v6h6v2h-6v6h-2v-6H5v-2z",
+  moins: "M5 11h14v2H5z",
+  reglages: "M12 1l9.5 5.5v11L12 23l-9.5-5.5v-11L12 1zm0 2.3L4.5 7.65v8.7L12 20.7l7.5-4.35v-8.7L12 3.3zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
+  verifier: "M5.46 4.43A9.95 9.95 0 0 1 12 2c5.52 0 10 4.48 10 10 0 2.14-.67 4.12-1.81 5.74L17 12h3A8 8 0 0 0 6.46 6.11l-1-1.68zm13.08 15.14A9.95 9.95 0 0 1 12 22C6.48 22 2 17.52 2 12c0-2.14.67-4.12 1.81-5.74L7 12H4a8 8 0 0 0 13.54 5.89l1 1.68z",
+  externe: "M10 6v2H5v11h11v-5h2v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6zm11-3v8h-2V6.41l-7.79 7.8-1.42-1.42L17.59 5H13V3h8z",
+};
+function icone(nom) {
+  const s = document.createElementNS(SVG_NS, "svg");
+  s.setAttribute("viewBox", "0 0 24 24");
+  s.setAttribute("aria-hidden", "true");
+  s.setAttribute("class", "lbl-icone");
+  const p = document.createElementNS(SVG_NS, "path");
+  p.setAttribute("d", ICONES[nom]);
+  s.append(p);
+  return s;
+}
+
 let compteurIds = 0;
 const nouvelId = (p) => `${p}-${++compteurIds}`;
 
@@ -40,10 +59,12 @@ function alerte(type, titre, texte) {
     texte ? h("p", { text: texte }) : null);
 }
 
-function bouton(texte, onclick, { type = "primary", disabled = false, icone = null } = {}) {
-  const cls = ["fr-btn", type === "secondary" ? "fr-btn--secondary" : type === "tertiary" ? "fr-btn--tertiary" : ""];
-  if (icone) cls.push(icone, "fr-btn--icon-left");
-  return h("button", { type: "button", class: cls.join(" "), disabled: disabled || S.occupe, onclick }, texte);
+function bouton(texte, onclick, { type = "primary", taille = "", disabled = false, ic = null } = {}) {
+  const cls = ["fr-btn", "lbl-btn"];
+  if (type !== "primary") cls.push(`fr-btn--${type}`);
+  if (taille) cls.push(`fr-btn--${taille}`);
+  return h("button", { type: "button", class: cls.join(" "), disabled: disabled || S.occupe, onclick },
+    ic ? icone(ic) : null, texte);
 }
 
 const fmtDate = new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short" });
@@ -75,28 +96,30 @@ const badge = (texte, cls) => h("span", { class: `fr-badge fr-badge--sm fr-badge
 const COULEUR_RE = /^[a-z]+(_[a-z]+)*$/;
 // Couleur DN (ex. « purple_glycine ») → classe du widget (ex. « lbl-c--purple-glycine »), voir widget.css
 const classeCouleur = (c) => (COULEUR_RE.test(c || "") ? `lbl-c--${c.replaceAll("_", "-")}` : "");
+const pluriel = (n, un, plusieurs) => `${n} ${n > 1 ? plusieurs : un}`;
 
 // ------------------------------------------------------------------ état et API
 
 const S = {
   contexte: null,
-  demarche: null,       // numéro
-  catalogue: [],        // [{id, nom, couleur}]
-  record: null,         // ligne sélectionnée dans Grist
-  records: [],          // lignes transmises au widget
-  onglet: "tableau",
-  tableau: { page: 1, recherche: "", filtreLabel: null, tri: { col: "__num", sens: "desc" }, colonnes: [], config: false,
-    selection: new Set() },
+  demarche: null,
+  catalogue: [],          // [{id, nom, couleur}]
+  records: [],            // lignes transmises au widget
+  onglet: "dossiers",
   jeton: null,
   expiration: 0,
   occupe: false,
-  message: null,        // {type, titre, texte}
-  synchro: null,        // {tache, derniere}
-  apercu: null,
-  masse: { action: "ajouter", label: "" },
+  message: null,          // {type, titre, texte}
+  synchro: null,          // {tache, derniere}
   journal: [],
   filtreJournal: "toutes",
-  modal: null,
+  rechercheJournal: "",
+  modal: null,            // {type: "masse" | "retrait", …}
+  ajoutPour: null,        // n° de dossier dont le menu « Ajouter un label » est ouvert
+  T: {
+    page: 1, recherche: "", etat: "", label: "", tri: { col: "__num", sens: "desc" },
+    colonnes: [], personnaliser: false, selection: new Set(),
+  },
 };
 
 async function jeton() {
@@ -158,7 +181,7 @@ async function lireTable(table, filtre) {
 // ------------------------------------------------------------------ données
 
 const numeroDe = (rec) => {
-  const n = parseInt(String(rec && rec.dossier_number || "").trim(), 10);
+  const n = parseInt(String((rec && rec.dossier_number) || "").trim(), 10);
   return Number.isInteger(n) && n > 0 ? n : null;
 };
 const numerosTransmis = () => [...new Set(S.records.map(numeroDe).filter(Boolean))];
@@ -176,7 +199,6 @@ async function chargerDemarche() {
   const [cat, synchro] = await Promise.all([api("GET", `${base()}/catalogue`), api("GET", `${base()}/synchro`)]);
   S.catalogue = cat.labels;
   S.synchro = synchro;
-  if (!S.masse.label && S.catalogue[0]) S.masse.label = S.catalogue[0].id;
   await chargerJournal();
 }
 
@@ -196,7 +218,7 @@ async function suivreSynchro() {
   if (t && t.statut === "ok") {
     const b = t.bilan;
     S.message = { type: "success", titre: "Synchronisation terminée",
-      texte: `${b.dossiers_lus} dossier(s) lu(s), ${b.dossiers_maj} mis à jour dans Grist (${b.duree_s} s).` };
+      texte: `${pluriel(b.dossiers_lus, "dossier lu", "dossiers lus")}, ${b.dossiers_maj} mis à jour dans Grist (${b.duree_s} s).` };
   } else if (t && t.statut === "erreur") {
     S.message = { type: "error", titre: "Synchronisation en erreur", texte: t.erreur };
   }
@@ -219,13 +241,13 @@ function messageBilan(b) {
     titre: `${verbe} de « ${b.label.nom} »`, texte: parts.join(" · ") || "Aucun changement." };
 }
 
-async function operer(actionLabel, labelId, numeros, envoyer = true) {
-  const b = await api("POST", `${base()}/operations`, { action: actionLabel, label_id: labelId, numeros, envoyer });
+async function operer(sens, labelId, numeros, envoyer = true) {
+  const b = await api("POST", `${base()}/operations`, { action: sens, label_id: labelId, numeros, envoyer });
   S.message = messageBilan(b);
   await chargerJournal();
 }
 
-// ------------------------------------------------------------------ rendu
+// ------------------------------------------------------------------ en-tête et onglets
 
 function enTete() {
   const demarches = (S.contexte && S.contexte.demarches) || [];
@@ -242,13 +264,16 @@ function enTete() {
     h("div", { class: "lbl-header__droite" },
       demarches.length > 1
         ? selectChamp("Démarche", demarches.map((d) => ({ value: String(d.numero), label: `${d.numero} — ${d.nom}` })),
-          String(S.demarche), (v) => action(async () => { S.demarche = Number(v); S.apercu = null; await chargerDemarche(); }),
-          { cacher: true })
+          String(S.demarche), (v) => action(async () => {
+            S.demarche = Number(v);
+            S.T.selection.clear();
+            await chargerDemarche();
+          }), { cacher: true })
         : h("span", { class: "lbl-mention", text: demarches[0] ? `${demarches[0].numero} — ${demarches[0].nom}` : "" }),
       etat));
 }
 
-const ONGLETS = [["tableau", "Tableau"], ["dossier", "Dossier"], ["masse", "En masse"], ["file", "File et journal"], ["regles", "Règles"], ["synchro", "Synchro"]];
+const ONGLETS = [["dossiers", "Dossiers"], ["file", "File et journal"], ["regles", "Règles"], ["synchro", "Synchro"]];
 
 function onglets() {
   const attente = S.journal.filter((l) => l.statut === "en_attente").length;
@@ -259,15 +284,11 @@ function onglets() {
     }, nom, id === "file" && attente ? h("span", { class: "lbl-compteur", text: String(attente) }) : null)));
 }
 
-// Colonnes techniques jamais proposées dans la configuration
+// ------------------------------------------------------------------ onglet Dossiers
+
 const COLONNES_CACHEES = new Set(["id", "manualSort", "labels_json", "label_names", "dossier_number"]);
 const PAR_PAGE = 50;
-
-function colonnesDisponibles() {
-  const vues = new Set();
-  for (const r of S.records.slice(0, 50)) for (const k of Object.keys(r)) vues.add(k);
-  return [...vues].filter((c) => !COLONNES_CACHEES.has(c) && !c.startsWith("gristHelper_")).sort();
-}
+const MAX_LOT = 500;
 
 // Intitulés des colonnes d'OTP, alignés sur ceux de DN ; les autres colonnes gardent leur identifiant mis en forme.
 const LIBELLES = {
@@ -278,11 +299,17 @@ const LIBELLES = {
   date_derniere_modification_champs: "Modification des champs", date_derniere_modification_annotations: "Modification des annotations",
   motivation: "Motivation", suivi_par: "Suivi par", date_accuse_lecture: "Accusé de lecture", correction_instructeur: "Correction demandée",
 };
-const libelleColonne = (c) => {
+function libelleColonne(c) {
   if (LIBELLES[c]) return LIBELLES[c];
   const t = c.replaceAll("_", " ");
   return t.charAt(0).toUpperCase() + t.slice(1);
-};
+}
+
+function colonnesDisponibles() {
+  const vues = new Set();
+  for (const r of S.records.slice(0, 50)) for (const k of Object.keys(r)) vues.add(k);
+  return [...vues].filter((c) => !COLONNES_CACHEES.has(c) && !c.startsWith("gristHelper_")).sort();
+}
 
 function valeurCellule(col, v) {
   if (v === null || v === undefined || v === "") return "";
@@ -295,8 +322,16 @@ function valeurCellule(col, v) {
   return String(v);
 }
 
+function comparer(a, b) {
+  const vide = (v) => v === null || v === undefined || v === "";
+  if (vide(a) || vide(b)) return vide(a) - vide(b);
+  if (a instanceof Date || b instanceof Date) return new Date(a) - new Date(b);
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(valeurCellule("", a)).localeCompare(String(valeurCellule("", b)), "fr", { numeric: true });
+}
+
 function enregistrerColonnes(colonnes) {
-  S.tableau.colonnes = colonnes;
+  S.T.colonnes = colonnes;
   rendu();
   grist.setOptions({ colonnes }).catch(() => {
     S.message = { type: "warning", titre: "Configuration non enregistrée", texte: "Elle sera perdue au rechargement." };
@@ -304,44 +339,59 @@ function enregistrerColonnes(colonnes) {
   });
 }
 
-function etatDesLieux(lignes) {
+function lignesFiltrees() {
+  const T = S.T;
+  const toutes = S.records.map((r) => ({ r, num: numeroDe(r), labels: labelsDuRecord(r) })).filter((l) => l.num);
+  let lignes = toutes;
+  if (T.recherche) lignes = lignes.filter((l) => String(l.num).includes(T.recherche));
+  if (T.etat) lignes = lignes.filter((l) => l.r.state === T.etat);
+  if (T.label === "__sans") lignes = lignes.filter((l) => !l.labels.length);
+  else if (T.label) lignes = lignes.filter((l) => l.labels.some((x) => x.id === T.label));
+  const cle = T.tri.col === "__num" ? (l) => l.num : T.tri.col === "__labels" ? (l) => l.labels.length : (l) => l.r[T.tri.col];
+  lignes.sort((a, b) => comparer(cle(a), cle(b)) * (T.tri.sens === "asc" ? 1 : -1));
+  return { toutes, lignes };
+}
+
+function panneauFiltres(toutes) {
+  const T = S.T;
+  const etats = [...new Set(toutes.map((l) => l.r.state).filter(Boolean))];
+  const idRech = nouvelId("rech");
   const compte = new Map();
   let sans = 0;
-  for (const l of lignes) {
+  for (const l of toutes) {
     if (!l.labels.length) sans++;
     for (const x of l.labels) compte.set(x.id, (compte.get(x.id) || 0) + 1);
   }
-  const connus = new Set(S.catalogue.map((c) => c.id));
-  const items = S.catalogue.map((c) => ({ id: c.id, nom: c.nom, couleur: c.couleur, n: compte.get(c.id) || 0 }));
-  for (const l of lignes) for (const x of l.labels) {
-    if (!connus.has(x.id)) { connus.add(x.id); items.push({ id: x.id, nom: `${x.name} (hors catalogue)`, couleur: x.color, n: compte.get(x.id) }); }
-  }
-  const actif = S.tableau.filtreLabel;
-  const filtre = (id) => () => { S.tableau.filtreLabel = actif === id ? null : id; S.tableau.page = 1; rendu(); };
-  return h("section", { class: "lbl-carte" },
-    h("h2", { class: "fr-h5 fr-mb-0", text: "État des lieux des labels" }),
-    h("div", { class: "lbl-stats" },
-      h("div", { class: "lbl-stat lbl-stat--fort" }, h("strong", { text: String(lignes.length) }), h("span", { text: "dossiers" })),
-      h("div", { class: "lbl-stat" }, h("strong", { text: String(lignes.length - sans) }), h("span", { text: "avec au moins un label" })),
-      h("div", { class: "lbl-stat" }, h("strong", { text: String(sans) }), h("span", { text: "sans label" }))),
-    h("div", { class: "lbl-tags lbl-filtres", role: "group", "aria-label": "Filtrer par label" },
-      items.map((it) => h("button", {
-        type: "button", class: `fr-tag ${classeCouleur(it.couleur)}`, "aria-pressed": actif === it.id ? "true" : "false",
-        onclick: filtre(it.id),
-      }, `${it.nom} · ${it.n}`)),
-      h("button", { type: "button", class: "fr-tag", "aria-pressed": actif === "__sans" ? "true" : "false",
-        onclick: filtre("__sans") }, `Sans label · ${sans}`)),
-    h("p", { class: "lbl-mention", text: "Cliquez sur un label pour filtrer le tableau ; recliquez pour retirer le filtre." }));
+  const filtrer = (id) => () => { T.label = T.label === id ? "" : id; T.page = 1; rendu(); };
+  return h("section", { class: "lbl-panneau", "aria-labelledby": "lbl-titre-filtres" },
+    h("h2", { class: "lbl-panneau__titre", id: "lbl-titre-filtres", text: "Rechercher / filtrer les dossiers" }),
+    h("div", { class: "lbl-filtres-grille" },
+      selectChamp("État du dossier", [{ value: "", label: "Tous" },
+        ...etats.map((e) => ({ value: e, label: (ETATS[e] || [e])[0] }))], T.etat, (v) => { T.etat = v; T.page = 1; rendu(); }),
+      h("div", { class: "fr-input-group" },
+        h("label", { class: "fr-label", for: idRech, text: "N° dossier" }),
+        h("div", { class: "fr-search-bar", role: "search" },
+          h("input", { class: "fr-input", type: "search", id: idRech, placeholder: "Rechercher", value: T.recherche,
+            inputmode: "numeric", oninput: (e) => { T.recherche = e.target.value.replace(/\D/g, ""); T.page = 1; rendu(); } }),
+          h("button", { type: "button", class: "fr-btn", title: "Rechercher", text: "Rechercher" }))),
+      selectChamp("Label", [{ value: "", label: "Tous" }, { value: "__sans", label: "Sans label" },
+        ...S.catalogue.map((l) => ({ value: l.id, label: l.nom }))], T.label, (v) => { T.label = v; T.page = 1; rendu(); })),
+    h("div", { class: "lbl-etat-des-lieux" },
+      h("span", { class: "lbl-mention", text: "État des lieux :" }),
+      h("div", { class: "lbl-tags lbl-filtres", role: "group", "aria-label": "Filtrer par label" },
+        S.catalogue.map((l) => h("button", {
+          type: "button", class: `fr-tag fr-tag--sm ${classeCouleur(l.couleur)}`, "aria-pressed": T.label === l.id ? "true" : "false",
+          onclick: filtrer(l.id),
+        }, `${l.nom} · ${compte.get(l.id) || 0}`)),
+        h("button", { type: "button", class: "fr-tag fr-tag--sm", "aria-pressed": T.label === "__sans" ? "true" : "false",
+          onclick: filtrer("__sans") }, `Sans label · ${sans}`))));
 }
 
-function configColonnes() {
+function panneauPersonnaliser() {
   const dispo = colonnesDisponibles();
-  const choisies = S.tableau.colonnes;
-  return h("section", { class: "lbl-carte" },
-    h("div", { class: "lbl-entre" },
-      h("h3", { class: "fr-h6 fr-mb-0", text: "Colonnes affichées" }),
-      bouton("Fermer", () => { S.tableau.config = false; rendu(); }, { type: "tertiary" })),
-    h("p", { class: "lbl-mention", text: "Le numéro et les labels sont toujours affichés. Le choix est enregistré dans le document Grist." }),
+  const choisies = S.T.colonnes;
+  return h("section", { class: "lbl-personnaliser", "aria-label": "Personnaliser le tableau" },
+    h("p", { class: "lbl-mention", text: "Colonnes affichées en plus du numéro et des labels. Le choix est enregistré dans le document Grist." }),
     dispo.length
       ? h("fieldset", { class: "fr-fieldset lbl-colonnes" },
         h("legend", { class: "lbl-cache", text: "Colonnes à afficher" }),
@@ -355,84 +405,83 @@ function configColonnes() {
       : h("p", { class: "lbl-mention", text: "Aucune autre colonne transmise au widget." }));
 }
 
-function filtreActif() {
-  const f = S.tableau.filtreLabel;
-  if (!f) return null;
-  const lab = S.catalogue.find((l) => l.id === f);
-  const nom = f === "__sans" ? "Sans label" : lab ? lab.nom : "Label hors catalogue";
-  return h("div", { class: "lbl-ligne lbl-filtre-actif" },
-    h("span", { class: "lbl-mention", text: "Filtre :" }),
-    h("button", {
-      type: "button", class: `fr-tag fr-tag--sm fr-tag--dismiss ${lab ? classeCouleur(lab.couleur) : ""}`,
-      "aria-label": `Retirer le filtre ${nom}`,
-      onclick: () => { S.tableau.filtreLabel = null; S.tableau.page = 1; rendu(); },
-    }, nom));
-}
-
-function comparer(a, b) {
-  const vide = (v) => v === null || v === undefined || v === "";
-  if (vide(a) || vide(b)) return vide(a) - vide(b);
-  if (a instanceof Date || b instanceof Date) return new Date(a) - new Date(b);
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  return String(valeurCellule("", a)).localeCompare(String(valeurCellule("", b)), "fr", { numeric: true });
-}
-
-function enteteTriable(titre, col) {
-  const T = S.tableau;
-  const actif = T.tri.col === col;
-  const sens = actif ? (T.tri.sens === "asc" ? "ascending" : "descending") : null;
-  return h("th", { scope: "col", "aria-sort": sens || "none" },
-    h("div", { class: "fr-cell--sort" }, titre,
-      h("button", {
-        type: "button", class: "fr-btn--sort fr-btn fr-btn--sm", "aria-sort": sens,
-        title: `Trier par ${titre}`,
-        onclick: () => { T.tri = { col, sens: actif && T.tri.sens === "asc" ? "desc" : "asc" }; T.page = 1; rendu(); },
-      }, `Trier par ${titre}`)));
-}
-
-function caseACocher(libelle, coche, onchange, { indetermine = false } = {}) {
-  const id = nouvelId("sel");
+function caseLigne(libelle, coche, onchange, { indetermine = false } = {}) {
+  const id = nouvelId("chk");
   const input = h("input", { type: "checkbox", id, checked: coche, onchange: (e) => onchange(e.target.checked) });
   input.indeterminate = indetermine;
   return h("div", { class: "fr-checkbox-group fr-checkbox-group--sm" }, input,
-    h("label", { class: "fr-label", for: id }, h("span", { class: "lbl-cache", text: libelle })));
+    h("label", { class: "fr-label", for: id, text: libelle }));
 }
 
-function vueTableau() {
-  const T = S.tableau;
-  const toutes = S.records
-    .map((r) => ({ r, num: numeroDe(r), labels: labelsDuRecord(r) }))
-    .filter((l) => l.num);
-  const q = T.recherche.trim();
-  let lignes = toutes.filter((l) => !q || String(l.num).includes(q));
-  if (T.filtreLabel === "__sans") lignes = lignes.filter((l) => !l.labels.length);
-  else if (T.filtreLabel) lignes = lignes.filter((l) => l.labels.some((x) => x.id === T.filtreLabel));
+function enteteTriable(titre, col) {
+  // Modèle DN : le titre est le bouton de tri ; une flèche n'apparaît que sur la colonne triée.
+  const T = S.T;
+  const actif = T.tri.col === col;
+  const sens = actif ? (T.tri.sens === "asc" ? "ascending" : "descending") : "none";
+  return h("th", { scope: "col", "aria-sort": sens },
+    h("button", {
+      type: "button", class: "lbl-tri",
+      onclick: () => { T.tri = { col, sens: actif && T.tri.sens === "asc" ? "desc" : "asc" }; T.page = 1; rendu(); },
+    }, titre, actif ? h("span", { "aria-hidden": "true", class: "lbl-tri__fleche", text: T.tri.sens === "asc" ? "↑" : "↓" }) : null));
+}
+
+function barreSelection(lignes) {
+  const T = S.T;
+  const n = T.selection.size;
+  const nums = [...T.selection];
+  const ouvrirMasse = (sens) => () => {
+    S.modal = { type: "masse", sens, numeros: nums, label: "", apercu: null, coche: false };
+    rendu();
+  };
+  const toutesSelectionnees = lignes.length > 0 && lignes.every((l) => T.selection.has(l.num));
+  return h("div", { class: "lbl-barre-selection", role: "region", "aria-label": "Actions sur la sélection" },
+    h("span", { class: "lbl-barre-selection__compte", text: n ? pluriel(n, "dossier sélectionné", "dossiers sélectionnés") : "0 dossier sélectionné" }),
+    bouton("Ajouter un label", ouvrirMasse("ajouter"), { type: "tertiary", taille: "sm", ic: "plus", disabled: !n }),
+    bouton("Retirer un label", ouvrirMasse("retirer"), { type: "tertiary", taille: "sm", ic: "moins", disabled: !n }),
+    bouton("Vérifier dans DN", () => action(() => lancerSynchro("ciblee", nums)),
+      { type: "tertiary", taille: "sm", ic: "verifier", disabled: !n || n > MAX_LOT }),
+    !toutesSelectionnees && lignes.length && n
+      ? h("button", { type: "button", class: "fr-link fr-link--sm lbl-lien",
+        onclick: () => { for (const l of lignes) T.selection.add(l.num); rendu(); } },
+        `Sélectionner les ${lignes.length} dossiers filtrés`)
+      : null,
+    n ? h("button", { type: "button", class: "fr-link fr-link--sm lbl-lien",
+      onclick: () => { T.selection.clear(); rendu(); } }, "Tout désélectionner") : null);
+}
+
+function menuAjout(l) {
+  const presents = new Set(l.labels.map((x) => x.id));
+  const dispo = S.catalogue.filter((c) => !presents.has(c.id));
+  return h("div", { class: "lbl-menu", role: "group", "aria-label": `Ajouter un label au dossier ${l.num}` },
+    dispo.length
+      ? dispo.map((c) => h("button", {
+        type: "button", class: `fr-tag fr-tag--sm ${classeCouleur(c.couleur)}`, disabled: S.occupe,
+        onclick: () => { S.ajoutPour = null; action(() => operer("ajouter", c.id, [l.num])); },
+      }, c.nom))
+      : h("span", { class: "lbl-mention", text: "Tous les labels sont déjà posés." }),
+    h("button", { type: "button", class: "fr-link fr-link--sm lbl-lien", onclick: () => { S.ajoutPour = null; rendu(); } }, "Fermer"));
+}
+
+function vueDossiers() {
+  const T = S.T;
+  const { toutes, lignes } = lignesFiltrees();
+  const presents = new Set(toutes.map((l) => l.num));
+  for (const n of [...T.selection]) if (!presents.has(n)) T.selection.delete(n); // sortis du périmètre
   const cols = T.colonnes.filter((c) => colonnesDisponibles().includes(c));
-  const cle = T.tri.col === "__num" ? (l) => l.num : T.tri.col === "__labels" ? (l) => l.labels.length : (l) => l.r[T.tri.col];
-  lignes.sort((a, b) => comparer(cle(a), cle(b)) * (T.tri.sens === "asc" ? 1 : -1));
   const pages = Math.max(1, Math.ceil(lignes.length / PAR_PAGE));
   T.page = Math.min(T.page, pages);
   const page = lignes.slice((T.page - 1) * PAR_PAGE, T.page * PAR_PAGE);
-  const idRecherche = nouvelId("rech");
-  const presents = new Set(toutes.map((l) => l.num));
-  for (const n of [...T.selection]) if (!presents.has(n)) T.selection.delete(n); // dossiers sortis du périmètre
   const nbPageSel = page.filter((l) => T.selection.has(l.num)).length;
+  const basculer = (num) => (c) => { if (c) T.selection.add(num); else T.selection.delete(num); rendu(); };
+  const lienDN = (num) => `https://demarche.numerique.gouv.fr/procedures/${S.demarche}/dossiers/${num}`;
 
-  const ouvrir = (l) => () => {
-    grist.setCursorPos({ rowId: l.r.id }).catch(() => {});
-    S.record = l.r;
-    S.onglet = "dossier";
-    rendu();
-  };
-  const basculer = (num) => (coche) => { if (coche) T.selection.add(num); else T.selection.delete(num); rendu(); };
-
-  const tableau = h("div", { class: "fr-table fr-table--bordered fr-table--multiline fr-mb-0" },
+  const tableau = h("div", { class: "fr-table fr-table--bordered fr-table--multiline fr-mb-0 lbl-tableau" },
     h("div", { class: "fr-table__wrapper" }, h("div", { class: "fr-table__container" }, h("div", { class: "fr-table__content" },
       h("table", {},
         h("caption", { class: "lbl-cache", text: "Dossiers de la démarche" }),
         h("thead", {}, h("tr", {},
           h("th", { class: "fr-cell--fixed", role: "columnheader" },
-            caseACocher("Sélectionner les dossiers de la page", page.length > 0 && nbPageSel === page.length, (c) => {
+            caseLigne("Sélectionner tous les dossiers de la page", page.length > 0 && nbPageSel === page.length, (c) => {
               for (const l of page) { if (c) T.selection.add(l.num); else T.selection.delete(l.num); }
               rendu();
             }, { indetermine: nbPageSel > 0 && nbPageSel < page.length })),
@@ -442,15 +491,21 @@ function vueTableau() {
           h("th", { scope: "col", text: "Actions" }))),
         h("tbody", {}, page.map((l) => h("tr", { "aria-selected": T.selection.has(l.num) ? "true" : "false" },
           h("th", { class: "fr-cell--fixed", scope: "row" },
-            caseACocher(`Sélectionner le dossier ${l.num}`, T.selection.has(l.num), basculer(l.num))),
-          h("td", {}, h("button", { type: "button", class: "fr-link lbl-lien", onclick: ouvrir(l), text: String(l.num) })),
+            caseLigne(`Sélectionner le dossier ${l.num}`, T.selection.has(l.num), basculer(l.num))),
+          h("td", {}, h("a", { class: "fr-link", href: lienDN(l.num), target: "_blank", rel: "noopener noreferrer",
+            title: `Ouvrir le dossier ${l.num} dans DN (nouvelle fenêtre)`, text: String(l.num) })),
           cols.map((c) => h("td", {}, valeurCellule(c, l.r[c]))),
           h("td", {}, l.labels.length
-            ? h("div", { class: "lbl-tags lbl-tags--pile" },
-              l.labels.map((x) => h("span", { class: `fr-tag fr-tag--sm ${classeCouleur(x.color)}`, text: x.name })))
+            ? h("div", { class: "lbl-tags lbl-tags--pile" }, l.labels.map((x) => h("button", {
+              type: "button", class: `fr-tag fr-tag--sm fr-tag--dismiss ${classeCouleur(x.color)}`, disabled: S.occupe,
+              "aria-label": `Retirer le label ${x.name} du dossier ${l.num}`,
+              onclick: () => { S.modal = { type: "retrait", num: l.num, label: x }; rendu(); },
+            }, x.name)))
             : h("span", { class: "lbl-mention", text: "—" })),
-          h("td", {}, h("button", { type: "button", class: "fr-btn fr-btn--sm fr-btn--secondary lbl-nowrap",
-            onclick: ouvrir(l), text: "Gérer les labels" }))))))))));
+          h("td", {},
+            bouton("Ajouter un label", () => { S.ajoutPour = S.ajoutPour === l.num ? null : l.num; rendu(); },
+              { type: "secondary", taille: "sm", ic: "plus" }),
+            S.ajoutPour === l.num ? menuAjout(l) : null)))))))));
 
   const pagination = pages > 1 ? h("nav", { class: "fr-pagination", "aria-label": "Pagination" },
     h("ul", { class: "fr-pagination__list" },
@@ -460,190 +515,132 @@ function vueTableau() {
       h("li", {}, h("button", { type: "button", class: "fr-pagination__link fr-pagination__link--next fr-pagination__link--lg-label",
         disabled: T.page >= pages, onclick: () => { T.page++; rendu(); } }, "Suivante")))) : null;
 
-  const barreSelection = T.selection.size ? h("div", { class: "lbl-selection", role: "status" },
-    h("strong", { text: `${T.selection.size} dossier(s) sélectionné(s)` }),
-    h("div", { class: "lbl-actions" },
-      bouton("Agir en masse sur la sélection", () => { S.onglet = "masse"; S.apercu = null; S.message = null; rendu(); }),
-      bouton("Tout désélectionner", () => { T.selection.clear(); rendu(); }, { type: "tertiary" }))) : null;
-
   return [
-    etatDesLieux(toutes),
-    T.config ? configColonnes() : null,
-    h("section", { class: "lbl-carte" },
-      h("div", { class: "lbl-entre" },
-        h("div", { class: "fr-search-bar", role: "search" },
-          h("label", { class: "fr-label", for: idRecherche, text: "Rechercher un numéro de dossier" }),
-          h("input", { class: "fr-input", type: "search", id: idRecherche, placeholder: "N° de dossier", value: T.recherche,
-            oninput: (e) => { T.recherche = e.target.value.replace(/\D/g, ""); T.page = 1; rendu(); } })),
-        bouton(T.config ? "Masquer la configuration" : "Configurer les colonnes", () => { T.config = !T.config; rendu(); },
-          { type: "secondary" })),
-      filtreActif(),
-      h("p", { class: "lbl-mention", text: `${lignes.length} dossier(s) — cliquez sur un numéro pour l'ouvrir.` }),
-      barreSelection,
-      lignes.length ? tableau : h("p", { class: "lbl-mention", text: "Aucun dossier ne correspond." }),
-      pagination),
+    panneauFiltres(toutes),
+    h("div", { class: "lbl-entre lbl-entre--centre" },
+      h("h2", { class: "fr-h4 fr-mb-0", text: pluriel(lignes.length, "dossier", "dossiers") }),
+      h("button", {
+        type: "button", class: "fr-btn fr-btn--tertiary fr-btn--sm lbl-btn", "aria-expanded": T.personnaliser ? "true" : "false",
+        onclick: () => { T.personnaliser = !T.personnaliser; rendu(); },
+      }, icone("reglages"), "Personnaliser le tableau")),
+    T.personnaliser ? panneauPersonnaliser() : null,
+    h("div", { class: "lbl-bloc-tableau" },
+      barreSelection(lignes),
+      lignes.length ? tableau : h("p", { class: "lbl-mention fr-p-2w", text: "Aucun dossier ne correspond." })),
+    pagination,
   ];
 }
 
-function vueDossier() {
-  const rec = S.record;
-  const num = numeroDe(rec);
-  if (!num) {
-    return alerte("info", "Aucun dossier sélectionné",
-      `Sélectionnez une ligne dans la table Demarche_${S.demarche}_dossiers liée à ce widget.`);
+// ------------------------------------------------------------------ fenêtres de confirmation
+
+async function calculerApercu() {
+  const m = S.modal;
+  m.apercu = null;
+  m.coche = false;
+  if (!m.label) { rendu(); return; }
+  m.chargement = true;
+  rendu();
+  try {
+    m.apercu = await api("POST", `${base()}/operations/apercu`, { action: m.sens, label_id: m.label, numeros: m.numeros });
+  } catch (e) {
+    m.erreur = e.message;
+  } finally {
+    m.chargement = false;
+    if (S.modal === m) rendu();
   }
-  const presents = labelsDuRecord(rec);
-  const idsPresents = new Set(presents.map((l) => l.id));
-  const ajoutables = S.catalogue.filter((l) => !idsPresents.has(l.id));
-  const etat = ETATS[rec.state] || [rec.state || "État inconnu", ""];
-  const lienDN = `https://demarche.numerique.gouv.fr/procedures/${S.demarche}/dossiers/${num}`;
-  let choix = ajoutables[0] ? ajoutables[0].id : "";
-
-  const historique = S.journal.filter((l) => String(l.dossier_number).trim() === String(num)).slice(0, 8);
-
-  return [
-    h("section", { class: "lbl-carte" },
-      h("div", { class: "lbl-entre" },
-        h("div", { class: "lbl-pile" },
-          h("p", { class: "lbl-mention", text: "Dossier sélectionné dans Grist" }),
-          h("h2", { class: "fr-h4 fr-mb-0", text: `Dossier n° ${num}` })),
-        h("div", { class: "lbl-pile lbl-pile--droite" },
-          badge(etat[0], etat[1]),
-          h("a", { class: "fr-link fr-link--sm", href: lienDN, target: "_blank", rel: "noopener noreferrer",
-            title: "Ouvrir dans DN (nouvelle fenêtre)", text: "Ouvrir dans DN" }))),
-      h("h3", { class: "fr-h6 fr-mb-0", text: "Labels" }),
-      presents.length
-        ? h("div", { class: "lbl-tags" }, presents.map((l) => h("button", {
-          type: "button", class: `fr-tag fr-tag--dismiss ${classeCouleur(l.color)}`,
-          "aria-label": `Retirer le label ${l.name}`, disabled: S.occupe,
-          onclick: () => action(() => operer("retirer", l.id, [num])),
-        }, l.name)))
-        : h("p", { class: "lbl-mention", text: "Aucun label sur ce dossier." }),
-      ajoutables.length
-        ? h("div", { class: "lbl-ligne" },
-          h("div", { class: "lbl-champ" },
-            selectChamp("Ajouter un label", ajoutables.map((l) => ({ value: l.id, label: l.nom })), choix, (v) => { choix = v; })),
-          bouton("Ajouter", () => action(() => operer("ajouter", choix, [num]))))
-        : null,
-      h("p", { class: "lbl-mention", text: "Chaque ajout ou retrait est envoyé immédiatement à DN, puis la ligne Grist est mise à jour." }),
-      h("div", { class: "lbl-actions" },
-        bouton("Vérifier ce dossier dans DN", () => action(() => lancerSynchro("ciblee", [num])), { type: "secondary" }))),
-    h("section", { class: "lbl-carte" },
-      h("h3", { class: "fr-h6 fr-mb-0", text: "Historique de ce dossier" }),
-      historique.length
-        ? h("ul", { class: "lbl-historique" }, historique.map((l) => h("li", {},
-          h("span", { class: "lbl-mention", text: dateEpoch(l.traite_le || l.cree_le) }),
-          h("span", {}, `${l.action === "ajouter" ? "Ajout" : "Retrait"} « ${l.label} » · `,
-            h("span", { class: "lbl-mention", text: l.source })),
-          badge(...(STATUTS[l.statut] || [l.statut, ""])))))
-        : h("p", { class: "lbl-mention", text: "Aucune opération enregistrée par cet outil." })),
-  ];
 }
 
-function perimetreMasse() {
-  const sel = [...S.tableau.selection];
-  return sel.length ? { numeros: sel, source: "selection" } : { numeros: numerosTransmis(), source: "transmis" };
-}
-
-function vueMasse() {
-  const { numeros, source } = perimetreMasse();
-  const trop = numeros.length > 500;
-  const a = S.apercu;
-  const lab = S.catalogue.find((l) => l.id === S.masse.label);
-  const radio = (val, texte) => {
-    const id = nouvelId("act");
-    return h("div", { class: "fr-fieldset__element fr-fieldset__element--inline" },
-      h("div", { class: "fr-radio-group" },
-        h("input", { type: "radio", id, name: "lbl-action", value: val, checked: S.masse.action === val,
-          onchange: () => { S.masse.action = val; S.apercu = null; rendu(); } }),
-        h("label", { class: "fr-label", for: id, text: texte })));
-  };
-  return h("section", { class: "lbl-carte" },
-    h("div", { class: "lbl-pile" },
-      h("p", { class: "lbl-mention", text: "Périmètre" }),
-      h("h2", { class: "fr-h4 fr-mb-0",
-        text: source === "selection" ? `${numeros.length} dossier(s) sélectionné(s) dans le tableau` : `${numeros.length} dossier(s) transmis au widget` }),
-      source === "selection"
-        ? h("div", { class: "lbl-actions" },
-          bouton("Modifier la sélection", () => { S.onglet = "tableau"; rendu(); }, { type: "tertiary" }),
-          bouton("Utiliser tous les dossiers transmis", () => { S.tableau.selection.clear(); S.apercu = null; rendu(); }, { type: "tertiary" }))
-        : h("p", { class: "lbl-mention", text: "Cochez des dossiers dans l'onglet Tableau pour restreindre le périmètre, ou filtrez la vue du widget." })),
-    trop ? alerte("warning", "Plus de 500 dossiers", "Filtrez la vue pour agir sur 500 dossiers au maximum à la fois.") : null,
-    h("fieldset", { class: "fr-fieldset" },
-      h("legend", { class: "fr-fieldset__legend fr-text--regular", text: "Action" }),
-      radio("ajouter", "Ajouter"), radio("retirer", "Retirer")),
-    h("div", { class: "lbl-champ" },
-      selectChamp("Label", S.catalogue.map((l) => ({ value: l.id, label: l.nom })), S.masse.label,
-        (v) => { S.masse.label = v; S.apercu = null; rendu(); })),
-    h("div", { class: "lbl-actions" },
-      bouton("Calculer l'aperçu", () => action(async () => {
-        S.apercu = await api("POST", `${base()}/operations/apercu`,
-          { action: S.masse.action, label_id: S.masse.label, numeros });
-      }), { type: "secondary", disabled: !numeros.length || trop || !S.masse.label })),
-    a ? h("div", { class: "lbl-pile" },
-      h("h3", { class: "fr-h6 fr-mb-0", text: "Aperçu (état actuel dans DN)" }),
-      h("div", { class: "lbl-stats" },
-        h("div", { class: "lbl-stat lbl-stat--fort" }, h("strong", { text: String(a.a_faire) }),
-          h("span", { text: a.action === "ajouter" ? "recevront le label" : "perdront le label" })),
-        h("div", { class: "lbl-stat" }, h("strong", { text: String(a.deja) }), h("span", { text: "déjà dans l'état voulu" })),
-        h("div", { class: "lbl-stat" }, h("strong", { text: String(a.introuvables) }), h("span", { text: "introuvables dans la démarche" }))),
-      h("div", { class: "lbl-actions" },
-        bouton(`${a.action === "ajouter" ? "Ajouter à" : "Retirer de"} ${a.a_faire} dossier(s)…`,
-          () => { S.modal = { a, numeros }; rendu(); }, { disabled: !a.a_faire }),
-        bouton("Mettre en file sans envoyer", () => action(async () => {
-          await operer(a.action, a.label.id, a.numeros_a_faire, false);
-          S.apercu = null;
-        }), { type: "secondary", disabled: !a.a_faire }))) : null,
-    lab && !a ? h("p", { class: "lbl-mention", text: "Calculez l'aperçu pour voir les dossiers concernés avant d'envoyer." }) : null);
-}
+function fermerModal() { S.modal = null; rendu(); }
 
 function modale() {
-  if (!S.modal) return null;
-  const { a, numeros } = S.modal;
-  const id = nouvelId("chk");
-  let coche = false;
-  const envoyer = bouton("Envoyer à DN", () => {
-    S.modal = null;
-    action(async () => { await operer(a.action, a.label.id, numeros); S.apercu = null; });
-  }, { disabled: true });
-  return h("div", { class: "lbl-modal" },
+  const m = S.modal;
+  if (!m) return null;
+  let titre, corps, actions;
+  if (m.type === "retrait") {
+    titre = "Retirer un label";
+    corps = [h("p", {}, "Retirer le label ", h("span", { class: `fr-tag fr-tag--sm ${classeCouleur(m.label.color)}`, text: m.label.name }),
+      ` du dossier ${m.num} ?`),
+    h("p", { class: "lbl-mention", text: "Le retrait est envoyé immédiatement à DN." })];
+    actions = [bouton("Annuler", fermerModal, { type: "secondary" }),
+      bouton("Retirer", () => { const { num, label } = m; S.modal = null; action(() => operer("retirer", label.id, [num])); })];
+  } else {
+    const n = m.numeros.length;
+    const a = m.apercu;
+    const trop = n > MAX_LOT;
+    titre = m.sens === "ajouter" ? `Ajouter un label à ${pluriel(n, "dossier", "dossiers")}` : `Retirer un label de ${pluriel(n, "dossier", "dossiers")}`;
+    const idChk = nouvelId("conf");
+    corps = [
+      trop ? alerte("warning", null, `Sélectionnez ${MAX_LOT} dossiers au maximum par envoi.`) : null,
+      selectChamp("Label", [{ value: "", label: "Choisir un label" }, ...S.catalogue.map((l) => ({ value: l.id, label: l.nom }))],
+        m.label, (v) => { m.label = v; m.erreur = null; calculerApercu(); }),
+      m.chargement ? h("p", { class: "lbl-mention", text: "Calcul de l'aperçu d'après l'état actuel dans DN…" }) : null,
+      m.erreur ? alerte("error", null, m.erreur) : null,
+      a ? h("div", { class: "lbl-stats" },
+        h("div", { class: "lbl-stat lbl-stat--fort" }, h("strong", { text: String(a.a_faire) }),
+          h("span", { text: m.sens === "ajouter" ? "recevront le label" : "perdront le label" })),
+        h("div", { class: "lbl-stat" }, h("strong", { text: String(a.deja) }), h("span", { text: "déjà dans l'état voulu" })),
+        h("div", { class: "lbl-stat" }, h("strong", { text: String(a.introuvables) }), h("span", { text: "introuvables" }))) : null,
+      a && a.a_faire ? h("div", { class: "fr-checkbox-group" },
+        h("input", { type: "checkbox", id: idChk, checked: m.coche, onchange: (e) => { m.coche = e.target.checked; rendu(); } }),
+        h("label", { class: "fr-label", for: idChk, text: "J'ai vérifié la sélection" })) : null,
+    ];
+    const pret = a && a.a_faire > 0 && !trop;
+    actions = [
+      bouton("Annuler", fermerModal, { type: "secondary" }),
+      bouton("Mettre en file", () => { const { sens, label, numeros } = m; S.modal = null; action(() => operer(sens, label, numeros, false)); },
+        { type: "tertiary", disabled: !pret }),
+      bouton("Envoyer à DN", () => {
+        const { sens, label, numeros } = m;
+        S.modal = null;
+        action(async () => { await operer(sens, label, numeros); S.T.selection.clear(); });
+      }, { disabled: !pret || !m.coche }),
+    ];
+  }
+  return h("div", { class: "lbl-modal", onclick: (e) => { if (e.target === e.currentTarget) fermerModal(); } },
     h("div", { class: "lbl-modal__boite", role: "dialog", "aria-modal": "true", "aria-labelledby": "lbl-modal-titre" },
-      h("h2", { class: "fr-h5", id: "lbl-modal-titre", text: "Confirmer l'envoi vers DN" }),
-      h("p", {}, `Le label « ${a.label.nom} » sera ${a.action === "ajouter" ? "ajouté à" : "retiré de"} `,
-        h("strong", { text: `${a.a_faire} dossier(s)` }), ` de la démarche ${S.demarche}.`),
-      h("p", { class: "lbl-mention", text: "Les instructeurs le verront immédiatement dans DN. L'opération est journalisée." }),
-      h("div", { class: "fr-checkbox-group" },
-        h("input", { type: "checkbox", id, onchange: (e) => { coche = e.target.checked; envoyer.disabled = !coche; } }),
-        h("label", { class: "fr-label", for: id, text: "J'ai vérifié le périmètre" })),
-      h("div", { class: "lbl-actions lbl-actions--droite" },
-        bouton("Annuler", () => { S.modal = null; rendu(); }, { type: "secondary" }), envoyer)));
+      h("div", { class: "lbl-entre" },
+        h("h2", { class: "fr-h5 fr-mb-0", id: "lbl-modal-titre", text: titre }),
+        h("button", { type: "button", class: "fr-btn--close fr-btn", title: "Fermer", onclick: fermerModal, text: "Fermer" })),
+      corps,
+      h("div", { class: "lbl-actions lbl-actions--droite" }, actions)));
 }
+
+// ------------------------------------------------------------------ autres onglets
 
 function vueFile() {
   const filtres = [["toutes", "Toutes"], ["en_attente", "En attente"], ["applique", "Appliquées"], ["erreur", "Erreurs"]];
-  const compte = (f) => (f === "toutes" ? S.journal.length : S.journal.filter((l) => l.statut === f).length);
-  const lignes = S.journal.filter((l) => S.filtreJournal === "toutes" || l.statut === S.filtreJournal).slice(0, 200);
-  const attente = compte("en_attente");
+  const parNumero = S.journal.filter((l) => !S.rechercheJournal || String(l.dossier_number).includes(S.rechercheJournal));
+  const compte = (f) => (f === "toutes" ? parNumero.length : parNumero.filter((l) => l.statut === f).length);
+  const lignes = parNumero.filter((l) => S.filtreJournal === "toutes" || l.statut === S.filtreJournal).slice(0, 200);
+  const attente = S.journal.filter((l) => l.statut === "en_attente").length;
+  const idRech = nouvelId("rechj");
   return h("section", { class: "lbl-carte" },
-    h("div", { class: "lbl-actions" }, filtres.map(([f, nom]) => h("button", {
-      type: "button", class: `fr-btn fr-btn--sm ${S.filtreJournal === f ? "" : "fr-btn--secondary"}`,
-      "aria-pressed": S.filtreJournal === f ? "true" : "false",
-      onclick: () => { S.filtreJournal = f; rendu(); },
-    }, `${nom} (${compte(f)})`))),
+    h("div", { class: "lbl-entre" },
+      h("div", { class: "lbl-actions" }, filtres.map(([f, nom]) => h("button", {
+        type: "button", class: `fr-btn fr-btn--sm ${S.filtreJournal === f ? "" : "fr-btn--secondary"}`,
+        "aria-pressed": S.filtreJournal === f ? "true" : "false",
+        onclick: () => { S.filtreJournal = f; rendu(); },
+      }, `${nom} (${compte(f)})`))),
+      h("div", { class: "fr-input-group fr-mb-0 lbl-champ" },
+        h("label", { class: "fr-label lbl-cache", for: idRech, text: "Filtrer par n° de dossier" }),
+        h("input", { class: "fr-input", type: "search", id: idRech, placeholder: "N° de dossier", value: S.rechercheJournal,
+          inputmode: "numeric", oninput: (e) => { S.rechercheJournal = e.target.value.replace(/\D/g, ""); rendu(); } }))),
     lignes.length
-      ? h("div", { class: "lbl-table" }, h("table", {},
-        h("caption", { class: "lbl-cache", text: "Opérations sur les labels" }),
-        h("thead", {}, h("tr", {}, ["Dossier", "Action", "Label", "Source", "Statut", "Date"].map((t) => h("th", { scope: "col", text: t })))),
-        h("tbody", {}, lignes.map((l) => h("tr", {},
-          h("td", { text: String(l.dossier_number) }),
-          h("td", { text: l.action === "ajouter" ? "Ajout" : "Retrait" }),
-          h("td", { text: l.label }),
-          h("td", { text: l.source }),
-          h("td", {}, badge(...(STATUTS[l.statut] || [l.statut, ""])), l.message ? h("div", { class: "lbl-mention", text: l.message }) : null),
-          h("td", { text: dateEpoch(l.traite_le || l.cree_le) }))))))
+      ? h("div", { class: "fr-table fr-table--bordered fr-table--multiline fr-mb-0" },
+        h("div", { class: "fr-table__wrapper" }, h("div", { class: "fr-table__container" }, h("div", { class: "fr-table__content" },
+          h("table", {},
+            h("caption", { class: "lbl-cache", text: "Opérations sur les labels" }),
+            h("thead", {}, h("tr", {}, ["Dossier", "Action", "Label", "Source", "Statut", "Date"].map((t) => h("th", { scope: "col", text: t })))),
+            h("tbody", {}, lignes.map((l) => h("tr", {},
+              h("td", { text: String(l.dossier_number) }),
+              h("td", { text: l.action === "ajouter" ? "Ajout" : "Retrait" }),
+              h("td", { text: l.label }),
+              h("td", { text: l.source }),
+              h("td", {}, badge(...(STATUTS[l.statut] || [l.statut, ""])), l.message ? h("div", { class: "lbl-mention", text: l.message }) : null),
+              h("td", { text: dateEpoch(l.traite_le || l.cree_le) })))))))))
       : h("p", { class: "lbl-mention", text: "Aucune opération." }),
     h("div", { class: "lbl-actions" },
-      bouton(`Envoyer les ${attente} opération(s) en attente`, () => action(async () => {
+      bouton(`Envoyer ${pluriel(attente, "opération en attente", "opérations en attente")}`, () => action(async () => {
         const r = await api("POST", `${base()}/operations/file/envoyer`);
         const t = r.lots.reduce((acc, b) => ({ a: acc.a + b.appliques, d: acc.d + b.deja, e: acc.e + b.erreurs + b.introuvables }), { a: 0, d: 0, e: 0 });
         S.message = { type: t.e ? "warning" : "success", titre: "File envoyée",
@@ -657,26 +654,28 @@ function vueSynchro() {
   const der = (S.synchro && S.synchro.derniere) || {};
   const tache = S.synchro && S.synchro.tache;
   const enCours = tache && tache.statut === "en_cours";
-  const numeros = numerosTransmis();
+  const sel = [...S.T.selection];
+  const cible = sel.length ? sel : numerosTransmis();
   const kv = (k, v) => h("div", { class: "lbl-kv" }, h("dt", { text: k }), h("dd", { text: v }));
   return [
     h("section", { class: "lbl-carte" },
-      h("h3", { class: "fr-h6 fr-mb-0", text: "Synchronisation DN → Grist" }),
+      h("h2", { class: "fr-h6 fr-mb-0", text: "Synchronisation DN → Grist" }),
       h("dl", { class: "fr-mb-0" },
         kv("Dernière synchro", der.fin ? `${ilYa(der.fin)} (${der.mode}, ${der.statut})` : "jamais"),
         kv("Résultat", der.statut === "erreur" ? der.message : der.fin ? `${der.dossiers_lus} lu(s), ${der.dossiers_maj} mis à jour` : "—"),
         kv("Dernière relecture complète", der.derniere_complete ? dateEpoch(der.derniere_complete) : "jamais")),
       h("div", { class: "lbl-actions" },
         bouton("Synchroniser maintenant", () => action(() => lancerSynchro("incrementale"))),
-        bouton(`Synchroniser les ${numeros.length} dossier(s) transmis`, () => action(() => lancerSynchro("ciblee", numeros)),
-          { type: "secondary", disabled: !numeros.length || numeros.length > 500 }),
+        bouton(sel.length ? `Synchroniser les ${pluriel(cible.length, "dossier sélectionné", "dossiers sélectionnés")}`
+          : `Synchroniser les ${pluriel(cible.length, "dossier transmis", "dossiers transmis")}`,
+        () => action(() => lancerSynchro("ciblee", cible)), { type: "secondary", disabled: !cible.length || cible.length > MAX_LOT }),
         bouton("Relecture complète", () => action(() => lancerSynchro("complete")), { type: "tertiary" })),
       enCours ? h("div", { class: "lbl-pile" },
         h("p", { class: "lbl-mention", text: `${tache.etape} — ${tache.dossiers_lus} dossier(s) lu(s)` }),
         h("div", { class: "lbl-progression", role: "progressbar", "aria-label": "Synchronisation en cours" },
           h("div", { class: "lbl-progression__barre" }))) : null),
     h("section", { class: "lbl-carte" },
-      h("h3", { class: "fr-h6 fr-mb-0", text: `Catalogue des labels — démarche ${S.demarche}` }),
+      h("h2", { class: "fr-h6 fr-mb-0", text: `Catalogue des labels — démarche ${S.demarche}` }),
       h("div", { class: "lbl-tags" }, S.catalogue.map((l) => h("span", { class: `fr-tag ${classeCouleur(l.couleur)}`, text: l.nom }))),
       h("p", { class: "lbl-mention", text: "Les labels se créent et se renomment dans l'administration de la démarche DN ; le catalogue est relu à chaque synchro." })),
   ];
@@ -686,11 +685,13 @@ function vueRegles() {
   return alerte("info", "Bientôt disponible", "Les règles automatiques ET / OU arrivent dans la prochaine version (phase 5).");
 }
 
+// ------------------------------------------------------------------ rendu
+
 function rendu() {
   const app = document.getElementById("app");
   if (!S.contexte) return;
   compteurIds = 0; // identifiants stables d'un rendu à l'autre (restauration du focus)
-  const vues = { tableau: vueTableau, dossier: vueDossier, masse: vueMasse, file: vueFile, regles: vueRegles, synchro: vueSynchro };
+  const vues = { dossiers: vueDossiers, file: vueFile, regles: vueRegles, synchro: vueSynchro };
   const focus = document.activeElement && document.activeElement.id;
   app.replaceChildren(
     enTete(),
@@ -701,12 +702,13 @@ function rendu() {
         h("div", { class: "lbl-progression__barre" })) : null,
       vues[S.onglet]()),
     modale());
-  if (focus) {
-    const el = document.getElementById(focus);
-    if (el) {
-      el.focus();
-      if (el.tagName === "INPUT" && el.type !== "checkbox" && el.type !== "radio") el.setSelectionRange?.(el.value.length, el.value.length);
-    }
+  const cible = focus && document.getElementById(focus);
+  if (cible) {
+    cible.focus();
+    if (cible.tagName === "INPUT" && cible.type === "search") cible.setSelectionRange(cible.value.length, cible.value.length);
+  } else if (S.modal) {
+    const premier = document.querySelector(".lbl-modal__boite select, .lbl-modal__boite button:not(.fr-btn--close)");
+    if (premier) premier.focus();
   }
 }
 
@@ -729,12 +731,17 @@ async function demarrer() {
   }
 }
 
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (S.modal) fermerModal();
+  else if (S.ajoutPour !== null) { S.ajoutPour = null; rendu(); }
+});
+
 grist.ready({ requiredAccess: "full", allowSelectBy: false });
 grist.onOptions((options) => {
   const c = options && Array.isArray(options.colonnes) ? options.colonnes : [];
-  S.tableau.colonnes = c.filter((x) => typeof x === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,99}$/.test(x));
+  S.T.colonnes = c.filter((x) => typeof x === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,99}$/.test(x));
   rendu();
 });
-grist.onRecord((rec) => { S.record = rec; if (S.onglet === "dossier") rendu(); });
-grist.onRecords((recs) => { S.records = recs || []; if (S.onglet !== "dossier") rendu(); });
+grist.onRecords((recs) => { S.records = recs || []; rendu(); });
 demarrer();
