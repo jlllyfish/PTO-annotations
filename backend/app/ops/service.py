@@ -210,11 +210,26 @@ async def envoyer_file(dn: DNClient, grist: GristClient, d: DemarcheConfig, *, c
     return bilans
 
 
-async def vider_journal(grist: GristClient, d: DemarcheConfig, *, cle_schema: str) -> int:
-    """Supprime les entrées TRAITÉES du journal de la démarche ; les opérations en attente sont conservées."""
+async def vider_journal(grist: GristClient, d: DemarcheConfig, *, cle_schema: str,
+                        anterieures_a: float | None = None) -> int:
+    """Supprime les entrées TRAITÉES du journal de la démarche ; les opérations en attente sont conservées.
+
+    `anterieures_a` (horodatage) : ne supprime que les entrées traitées avant cette date (vidange automatique).
+    """
     await assurer_schema(grist, cle_schema)
-    rows = await grist.sql(
-        f'SELECT id FROM "{JOURNAL}" WHERE demarche = ? AND statut != ?',  # noqa: S608  # nosec B608 (constante)
-        [d.numero, "en_attente"],
-    )
+    sql = f'SELECT id FROM "{JOURNAL}" WHERE demarche = ? AND statut != ?'  # noqa: S608  # nosec B608 (constante)
+    args: list[Any] = [d.numero, "en_attente"]
+    if anterieures_a is not None:
+        sql += " AND COALESCE(traite_le, cree_le) < ?"
+        args.append(anterieures_a)
+    rows = await grist.sql(sql, args)
     return await grist.supprimer(JOURNAL, [r["id"] for r in rows]) if rows else 0
+
+
+async def vidange_automatique(grist: GristClient, d: DemarcheConfig, jours: int, *, cle_schema: str,
+                              maintenant: float | None = None) -> int:
+    """Applique la durée de conservation du journal ; ne fait rien si elle vaut 0."""
+    if jours <= 0:
+        return 0
+    limite = (maintenant or time.time()) - jours * 86400
+    return await vider_journal(grist, d, cle_schema=cle_schema, anterieures_a=limite)

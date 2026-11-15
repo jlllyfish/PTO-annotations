@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..config import read_secret
 from ..grist.client import GristClient
+from ..ops.service import vidange_automatique
 from ..sync.jobs import DejaEnCours
 from ..sync.service import Mode, Progression, lire_etat, synchroniser
 from .routes import Qui, client_dn, demarche_de
@@ -82,7 +83,10 @@ async def tache_planifiee(
             async def travail(prog: Progression, doc=doc, d=d, dn=dn):
                 async with GristClient.par_cle(cfg.grist_host, doc.grist_doc_id, cle,
                                                transport=request.app.state.grist_transport) as grist:
-                    return await synchroniser(dn, grist, d, Mode(mode), cle_schema=doc.grist_doc_id, progression=prog)
+                    bilan = await synchroniser(dn, grist, d, Mode(mode), cle_schema=doc.grist_doc_id, progression=prog)
+                    bilan.journal_purge = await vidange_automatique(
+                        grist, d, cfg.journal_retention_jours, cle_schema=doc.grist_doc_id)
+                    return bilan
 
             try:
                 tache = await request.app.state.taches.executer(

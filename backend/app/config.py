@@ -83,6 +83,8 @@ class AppConfig(_Strict):
     grist_service_key: str = Field(default="GRIST_SERVICE_KEY", pattern=ENV_NAME_RE)
     dn_api_url: HttpUrl = HttpUrl("https://demarche.numerique.gouv.fr/api/v2/graphql")
     dn_concurrence: int = Field(default=4, ge=1, le=8)
+    # Les entrées traitées du journal plus anciennes sont supprimées automatiquement (0 = jamais)
+    journal_retention_jours: int = Field(default=30, ge=0, le=3650)
     # Secret partagé avec n8n pour déclencher les tâches de fond (route désactivée si absent)
     task_token: str | None = Field(default=None, pattern=ENV_NAME_RE)
     documents: list[DocumentConfig] = Field(min_length=1)

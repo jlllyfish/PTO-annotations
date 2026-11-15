@@ -713,6 +713,13 @@ function pastilleJournal(l) {
   return h("span", { class: `fr-tag fr-tag--sm ${c ? classeCouleur(c.couleur) : ""}`, text: l.label || "?" });
 }
 
+function retentionJournal() {
+  const j = S.contexte && S.contexte.journal_retention_jours;
+  return h("p", { class: "lbl-mention", text: j
+    ? `Les entrées traitées de plus de ${pluriel(j, "jour", "jours")} sont supprimées automatiquement ; les opérations en attente sont conservées.`
+    : "Les entrées du journal sont conservées sans limite de durée." });
+}
+
 function vueFile() {
   const filtres = [["toutes", "Toutes"], ["en_attente", "En attente"], ["applique", "Appliquées"], ["erreur", "Erreurs"]];
   const parNumero = S.journal.filter((l) => !S.rechercheJournal || String(l.dossier_number).includes(S.rechercheJournal));
@@ -737,6 +744,7 @@ function vueFile() {
         h("label", { class: "fr-label lbl-cache", for: idRech, text: "Filtrer par n° de dossier" }),
         h("input", { class: "fr-input", type: "search", id: idRech, placeholder: "N° de dossier", value: S.rechercheJournal,
           inputmode: "numeric", oninput: (e) => { S.rechercheJournal = e.target.value.replace(/\D/g, ""); rendu(); } }))),
+    retentionJournal(),
     h("div", { class: "lbl-actions" }, filtres.map(([f, nom]) => h("button", {
       type: "button", class: `fr-btn fr-btn--sm ${S.filtreJournal === f ? "" : "fr-btn--secondary"}`,
       "aria-pressed": S.filtreJournal === f ? "true" : "false",

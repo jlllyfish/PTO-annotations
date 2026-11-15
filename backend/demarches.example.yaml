@@ -9,6 +9,8 @@ dn_api_url: https://demarche.numerique.gouv.fr/api/v2/graphql
 dn_concurrence: 4
 # Secret partagé avec n8n pour POST /api/taches/synchro (supprimer la ligne pour désactiver la route)
 task_token: LBL_TASK_TOKEN
+# Entrées traitées du journal supprimées après ce nombre de jours (0 = jamais ; la file n'est jamais vidée)
+journal_retention_jours: 30
 
 documents:
   - grist_doc_id: AbCdEfGh1234          # Paramètres du document Grist › API

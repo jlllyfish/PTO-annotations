@@ -48,11 +48,12 @@ async def health() -> dict[str, bool]:
 
 
 @router.get("/api/contexte")
-async def contexte(qui: Qui) -> dict:
+async def contexte(request: Request, qui: Qui) -> dict:
     doc = qui.document
     return {
         "document": {"id": doc.grist_doc_id, "nom": doc.nom},
         "demarches": [{"numero": d.numero, "nom": d.nom, "table": d.table} for d in doc.demarches],
+        "journal_retention_jours": request.app.state.config.journal_retention_jours,
     }
 
 

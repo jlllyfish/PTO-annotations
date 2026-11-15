@@ -1,7 +1,15 @@
 import pytest
 
 from app.dn.client import Action
-from app.ops.service import LabelInconnu, apercu, envoyer_file, executer, mettre_en_file, vider_journal
+from app.ops.service import (
+    LabelInconnu,
+    apercu,
+    envoyer_file,
+    executer,
+    mettre_en_file,
+    vidange_automatique,
+    vider_journal,
+)
 from app.sync import schema
 
 from .fakes import FakeDN, FakeGrist
@@ -93,3 +101,18 @@ async def test_vider_journal_conserve_la_file():
     assert await vider_journal(g, D, cle_schema="doc") == 2
     restant = {(r["demarche"], r["statut"]) for r in g.rows("LBL_Operations")}
     assert restant == {(149930, "en_attente"), (999, "applique")}   # file et autres démarches intactes
+
+
+@pytest.mark.anyio
+async def test_vidange_automatique_par_anciennete():
+    g, dn = setup()
+    await mettre_en_file(dn, g, D, Action.AJOUTER, "LU", [3], source="manuel", cle_schema="doc")
+    jour = 86400
+    now = 2_000_000_000
+    for num, statut, age in [("1", "applique", 40), ("2", "erreur", 31), ("4", "applique", 5), ("5", "en_attente", 90)]:
+        g.db.execute('''INSERT INTO "LBL_Operations" (demarche, dossier_number, statut, cree_le, traite_le)
+                        VALUES (149930, ?, ?, ?, ?)''', [num, statut, now - age * jour, now - age * jour])
+    assert await vidange_automatique(g, D, 0, cle_schema="doc", maintenant=now) == 0   # désactivée
+    assert await vidange_automatique(g, D, 30, cle_schema="doc", maintenant=now) == 2
+    restant = sorted((r["dossier_number"], r["statut"]) for r in g.rows("LBL_Operations"))
+    assert restant == [("3", "en_attente"), ("4", "applique"), ("5", "en_attente")]

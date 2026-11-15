@@ -9,7 +9,15 @@ from fastapi import APIRouter, HTTPException, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..dn.client import Action
-from ..ops.service import LabelInconnu, apercu, envoyer_file, executer, mettre_en_file, vider_journal
+from ..ops.service import (
+    LabelInconnu,
+    apercu,
+    envoyer_file,
+    executer,
+    mettre_en_file,
+    vidange_automatique,
+    vider_journal,
+)
 from .routes import Qui, client_dn, demarche_de
 
 router = APIRouter()
@@ -51,6 +59,7 @@ async def route_operations(request: Request, qui: Qui, numero: Num, demande: Dem
             if demande.envoyer:
                 bilan = await executer(dn, grist, d, demande.action, demande.label_id, demande.numeros,
                                        source="manuel", cle_schema=doc)
+                await vidange_automatique(grist, d, request.app.state.config.journal_retention_jours, cle_schema=doc)
             else:
                 bilan = await mettre_en_file(dn, grist, d, demande.action, demande.label_id, demande.numeros,
                                              source="manuel", cle_schema=doc)
@@ -63,7 +72,9 @@ async def route_operations(request: Request, qui: Qui, numero: Num, demande: Dem
 async def route_envoyer_file(request: Request, qui: Qui, numero: Num) -> dict:
     d = demarche_de(qui, numero)
     async with qui.grist(request.app.state.grist_transport) as grist:
-        bilans = await envoyer_file(client_dn(request, d), grist, d, cle_schema=qui.document.grist_doc_id)
+        doc = qui.document.grist_doc_id
+        bilans = await envoyer_file(client_dn(request, d), grist, d, cle_schema=doc)
+        await vidange_automatique(grist, d, request.app.state.config.journal_retention_jours, cle_schema=doc)
     return {"lots": [asdict(b) for b in bilans]}
 
 

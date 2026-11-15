@@ -56,6 +56,7 @@ def test_contexte(api):
     r = api.get("/api/contexte", headers=AUTH)
     assert r.status_code == 200
     assert r.json()["demarches"] == [{"numero": 149930, "nom": "Western Pony Club", "table": "Demarche_149930_dossiers"}]
+    assert r.json()["journal_retention_jours"] == 30
 
 
 def test_catalogue(api):

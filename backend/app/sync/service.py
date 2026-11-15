@@ -55,6 +55,7 @@ class Bilan:
     labels_catalogue: int = 0
     duree_s: float = 0.0
     numeros_maj: list[str] = field(default_factory=list)
+    journal_purge: int = 0  # entrées de journal supprimées par la vidange automatique
 
     def resume(self) -> dict[str, Any]:
         d = asdict(self)

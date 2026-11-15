@@ -42,6 +42,12 @@ def faux_sync(monkeypatch):
         return Bilan(d.numero, mode, dossiers_lus=3, dossiers_maj=1)
 
     monkeypatch.setattr(sync_routes, "synchroniser", fake)
+
+    async def fausse_vidange(grist, d, jours, *, cle_schema, maintenant=None):
+        appels.append(("vidange", d.numero, jours))
+        return 2
+
+    monkeypatch.setattr(sync_routes, "vidange_automatique", fausse_vidange)
     fake.appels = appels
     return fake
 
@@ -111,5 +117,6 @@ def test_tache_planifiee(config_taches, faux_sync):
         assert r.status_code == 200
         body = r.json()
         assert body["ok"] and body["resultats"][0]["statut"] == "ok"
-        assert faux_sync.appels == [(149930, "complete", None)]
+        assert faux_sync.appels == [(149930, "complete", None), ("vidange", 149930, 30)]
+        assert body["resultats"][0]["bilan"]["journal_purge"] == 2
         assert c.post("/api/taches/synchro?mode=ciblee", headers={"Authorization": "Bearer s3cret-n8n"}).status_code == 422
