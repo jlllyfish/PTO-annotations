@@ -1,4 +1,4 @@
-# Labels DN ↔ Grist
+# PTO-labels — labels Démarche Numérique ↔ Grist
 
 Gérer les labels des dossiers **Démarche Numérique** depuis un document **Grist** synchronisé par
 [OTP](https://github.com/betagouv/OTP-DS-to-Grist) : widget DSFR, ajout/retrait unitaire ou en masse,
@@ -8,6 +8,11 @@ règles automatiques ET/OU, synchronisation incrémentale.
 |---|---|
 | `backend/` | API FastAPI + service du widget (phase 1 : socle) |
 | `spikes/` | Scripts de vérification de la phase 0 et leur fiche de résultats (`RESULTATS.md`) |
+
+## Licence et composants tiers
+
+Code sous licence MIT (voir `LICENSE`). Le DSFR auto-hébergé dans `backend/app/static/dsfr/` est distribué
+sous sa propre licence (`backend/app/static/dsfr/LICENSE.md`) ; la police Marianne est réservée aux services de l'État.
 
 ## Lancer le backend en local (PowerShell)
 
