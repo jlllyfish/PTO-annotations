@@ -1,0 +1,18 @@
+# Configuration fonctionnelle — AUCUN secret ici, seulement le NOM des variables qui les portent.
+# Copier en demarches.yaml. Chaque secret NOM est lu dans la variable NOM ou dans le fichier NOM_FILE.
+
+grist_host: grist.numerique.gouv.fr
+# Clé API Grist du compte de service (tâches de fond : synchro, règles automatiques)
+grist_service_key: GRIST_SERVICE_KEY
+dn_api_url: https://demarche.numerique.gouv.fr/api/v2/graphql
+# Requêtes simultanées max vers DN (phase 0 : 4 est confortable)
+dn_concurrence: 4
+
+documents:
+  - grist_doc_id: AbCdEfGh1234          # Paramètres du document Grist › API
+    nom: One Trick Pony (test)
+    demarches:
+      - numero: 149930
+        nom: Western Pony Club
+        dn_token: DN_TOKEN_TEST          # un jeton par démarche (ou partagé) — moindre privilège
+        # table_dossiers: Demarche_149930_dossiers   # défaut, table créée par OTP

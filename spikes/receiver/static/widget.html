@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Test jeton Grist</title>
+  <link rel="stylesheet" href="/widget.css">
+  <script src="__PLUGIN_API_URL__"></script>
+  <script src="/widget.js" defer></script>
+</head>
+<body>
+  <h1>Test getAccessToken</h1>
+  <p>Demande un jeton d'accès au document, puis le fait vérifier par le serveur.</p>
+  <label><input type="checkbox" id="readonly" checked> Jeton en lecture seule</label>
+  <button id="go" type="button">Obtenir et vérifier le jeton</button>
+  <pre id="out">En attente…</pre>
+</body>
+</html>
