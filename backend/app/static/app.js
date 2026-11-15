@@ -30,6 +30,9 @@ const ICONES = {
   reglages: "M12 1l9.5 5.5v11L12 23l-9.5-5.5v-11L12 1zm0 2.3L4.5 7.65v8.7L12 20.7l7.5-4.35v-8.7L12 3.3zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
   verifier: "M5.46 4.43A9.95 9.95 0 0 1 12 2c5.52 0 10 4.48 10 10 0 2.14-.67 4.12-1.81 5.74L17 12h3A8 8 0 0 0 6.46 6.11l-1-1.68zm13.08 15.14A9.95 9.95 0 0 1 12 22C6.48 22 2 17.52 2 12c0-2.14.67-4.12 1.81-5.74L7 12H4a8 8 0 0 0 13.54 5.89l1 1.68z",
   haut: "M13 7.83V20h-2V7.83l-5.36 5.36-1.42-1.41L12 4l7.78 7.78-1.42 1.41z",
+  bas: "M13 16.17V4h-2v12.17l-5.36-5.36-1.42 1.41L12 20l7.78-7.78-1.42-1.41z",
+  fermer: "M12 10.59l4.95-4.95 1.41 1.41L13.41 12l4.95 4.95-1.41 1.41L12 13.41l-4.95 4.95-1.41-1.41L10.59 12 5.64 7.05l1.41-1.41L12 10.59z",
+  relire: "M12 2c5.52 0 10 4.48 10 10s-4.48 10-10 10S2 17.52 2 12h2a8 8 0 1 0 2.34-5.66L8.5 8.5H2.5v-6l2.42 2.42A9.96 9.96 0 0 1 12 2zm1 5v4.59l3.2 3.2-1.41 1.42L11 12.41V7h2z",
   externe: "M10 6v2H5v11h11v-5h2v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6zm11-3v8h-2V6.41l-7.79 7.8-1.42-1.42L17.59 5H13V3h8z",
 };
 function icone(nom) {
@@ -273,9 +276,9 @@ function enTete() {
         : h("span", { class: "lbl-mention", text: demarches[0] ? `${demarches[0].numero} — ${demarches[0].nom}` : "" }),
       etat,
       bouton("Synchroniser", () => action(() => lancerSynchro("incrementale")), { type: "tertiary", taille: "sm", ic: "verifier" }),
-      h("button", { type: "button", class: "fr-link fr-link--sm lbl-lien", disabled: S.occupe,
+      h("button", { type: "button", class: "fr-btn fr-btn--tertiary fr-btn--sm lbl-btn", disabled: S.occupe,
         title: "Relit tous les dossiers de la démarche dans DN (à utiliser en cas de doute)",
-        onclick: () => action(() => lancerSynchro("complete")) }, "Relecture complète")));
+        onclick: () => action(() => lancerSynchro("complete")) }, icone("relire"), "Relecture complète")));
 }
 
 function etatSynchroEnCours() {
@@ -323,6 +326,16 @@ function colonnesDisponibles() {
   return [...vues].filter((c) => !COLONNES_CACHEES.has(c) && !c.startsWith("gristHelper_")).sort();
 }
 
+const COL_LABELS = "__labels";
+
+// Colonnes affichées dans l'ordre choisi ; la colonne Labels est toujours présente (en dernier par défaut).
+function colonnesAffichees() {
+  const dispo = new Set(colonnesDisponibles());
+  const ordre = S.T.colonnes.filter((c) => c === COL_LABELS || dispo.has(c));
+  if (!ordre.includes(COL_LABELS)) ordre.push(COL_LABELS);
+  return ordre;
+}
+
 function valeurCellule(col, v) {
   if (v === null || v === undefined || v === "") return "";
   if (col === "state" && ETATS[v]) return badge(ETATS[v][0], ETATS[v][1]);
@@ -359,7 +372,7 @@ function lignesFiltrees() {
   if (T.etat) lignes = lignes.filter((l) => l.r.state === T.etat);
   if (T.label === "__sans") lignes = lignes.filter((l) => !l.labels.length);
   else if (T.label) lignes = lignes.filter((l) => l.labels.some((x) => x.id === T.label));
-  const cle = T.tri.col === "__num" ? (l) => l.num : T.tri.col === "__labels" ? (l) => l.labels.length : (l) => l.r[T.tri.col];
+  const cle = T.tri.col === "__num" ? (l) => l.num : T.tri.col === COL_LABELS ? (l) => l.labels.length : (l) => l.r[T.tri.col];
   lignes.sort((a, b) => comparer(cle(a), cle(b)) * (T.tri.sens === "asc" ? 1 : -1));
   return { toutes, lignes };
 }
@@ -400,21 +413,42 @@ function panneauFiltres(toutes) {
 }
 
 function panneauPersonnaliser() {
-  const dispo = colonnesDisponibles();
-  const choisies = S.T.colonnes;
+  const ordre = colonnesAffichees();
+  const autres = colonnesDisponibles().filter((c) => !ordre.includes(c));
+  const nom = (c) => (c === COL_LABELS ? "Labels" : libelleColonne(c));
+  const deplacer = (i, d) => () => {
+    const n = [...ordre];
+    [n[i], n[i + d]] = [n[i + d], n[i]];
+    enregistrerColonnes(n);
+  };
+  const petitBouton = (id, libelle, ic, onclick, disabled) => h("button", {
+    type: "button", id, class: "fr-btn fr-btn--tertiary-no-outline fr-btn--sm lbl-btn-icone", title: libelle,
+    "aria-label": libelle, disabled, onclick }, icone(ic));
   return h("section", { class: "lbl-personnaliser", "aria-label": "Personnaliser le tableau" },
-    h("p", { class: "lbl-mention", text: "Colonnes affichées en plus du numéro et des labels. Le choix est enregistré dans le document Grist." }),
-    dispo.length
-      ? h("fieldset", { class: "fr-fieldset lbl-colonnes" },
-        h("legend", { class: "lbl-cache", text: "Colonnes à afficher" }),
-        dispo.map((c) => {
-          const id = nouvelId("col");
-          return h("div", { class: "fr-fieldset__element" }, h("div", { class: "fr-checkbox-group fr-checkbox-group--sm" },
-            h("input", { type: "checkbox", id, checked: choisies.includes(c),
-              onchange: (e) => enregistrerColonnes(e.target.checked ? [...choisies, c] : choisies.filter((x) => x !== c)) }),
-            h("label", { class: "fr-label", for: id, text: libelleColonne(c) })));
-        }))
-      : h("p", { class: "lbl-mention", text: "Aucune autre colonne transmise au widget." }));
+    h("div", { class: "lbl-personnaliser__col" },
+      h("h3", { class: "fr-text--md fr-text--bold fr-mb-0", text: "Colonnes affichées" }),
+      h("p", { class: "lbl-mention", text: "Le n° de dossier reste en première position et les actions en dernière." }),
+      h("ol", { class: "lbl-ordre" }, ordre.map((c, i) => h("li", { class: "lbl-ordre__item" },
+        h("span", { class: "lbl-ordre__nom", text: nom(c) }),
+        h("span", { class: "lbl-ordre__actions" },
+          petitBouton(`ord-h-${c}`, `Monter la colonne ${nom(c)}`, "haut", deplacer(i, -1), i === 0),
+          petitBouton(`ord-b-${c}`, `Descendre la colonne ${nom(c)}`, "bas", deplacer(i, 1), i === ordre.length - 1),
+          c === COL_LABELS
+            ? h("span", { class: "lbl-btn-icone lbl-btn-icone--vide", "aria-hidden": "true" })
+            : petitBouton(`ord-x-${c}`, `Masquer la colonne ${nom(c)}`, "fermer", () => enregistrerColonnes(ordre.filter((x) => x !== c)), false)))))),
+    h("div", { class: "lbl-personnaliser__col" },
+      h("h3", { class: "fr-text--md fr-text--bold fr-mb-0", text: "Colonnes disponibles" }),
+      h("p", { class: "lbl-mention", text: "Cochez une colonne pour l'ajouter en fin de tableau. Le choix est enregistré dans le document Grist." }),
+      autres.length
+        ? h("fieldset", { class: "fr-fieldset lbl-colonnes" },
+          h("legend", { class: "lbl-cache", text: "Colonnes à ajouter" }),
+          autres.map((c) => {
+            const id = `col-${c}`;
+            return h("div", { class: "fr-fieldset__element" }, h("div", { class: "fr-checkbox-group fr-checkbox-group--sm" },
+              h("input", { type: "checkbox", id, onchange: () => enregistrerColonnes([...ordre, c]) }),
+              h("label", { class: "fr-label", for: id, text: libelleColonne(c) })));
+          }))
+        : h("p", { class: "lbl-mention", text: "Toutes les colonnes sont affichées." })));
 }
 
 function caseLigne(libelle, coche, onchange, { indetermine = false } = {}) {
@@ -462,6 +496,16 @@ function barreSelection(lignes) {
       onclick: () => { T.selection.clear(); rendu(); } }, "Tout désélectionner") : null);
 }
 
+function celluleLabels(l) {
+  return h("td", {}, l.labels.length
+    ? h("div", { class: "lbl-tags lbl-tags--pile" }, l.labels.map((x) => h("button", {
+      type: "button", class: `fr-tag fr-tag--sm fr-tag--dismiss ${classeCouleur(x.color)}`, disabled: S.occupe,
+      "aria-label": `Retirer le label ${x.name} du dossier ${l.num}`,
+      onclick: () => { S.modal = { type: "retrait", num: l.num, label: x }; rendu(); },
+    }, x.name)))
+    : h("span", { class: "lbl-mention", text: "—" }));
+}
+
 function menuAjout(l) {
   const presents = new Set(l.labels.map((x) => x.id));
   const dispo = S.catalogue.filter((c) => !presents.has(c.id));
@@ -480,7 +524,7 @@ function vueDossiers() {
   const { toutes, lignes } = lignesFiltrees();
   const presents = new Set(toutes.map((l) => l.num));
   for (const n of [...T.selection]) if (!presents.has(n)) T.selection.delete(n); // sortis du périmètre
-  const cols = T.colonnes.filter((c) => colonnesDisponibles().includes(c));
+  const ordre = colonnesAffichees();
   const pages = Math.max(1, Math.ceil(lignes.length / PAR_PAGE));
   T.page = Math.min(T.page, pages);
   const page = lignes.slice((T.page - 1) * PAR_PAGE, T.page * PAR_PAGE);
@@ -499,22 +543,15 @@ function vueDossiers() {
               rendu();
             }, { indetermine: nbPageSel > 0 && nbPageSel < page.length })),
           enteteTriable("N° dossier", "__num"),
-          cols.map((c) => enteteTriable(libelleColonne(c), c)),
-          enteteTriable("Labels", "__labels"),
+          ordre.map((c) => (c === COL_LABELS ? enteteTriable("Labels", COL_LABELS) : enteteTriable(libelleColonne(c), c))),
           h("th", { scope: "col", text: "Actions" }))),
         h("tbody", {}, page.map((l) => h("tr", { "aria-selected": T.selection.has(l.num) ? "true" : "false" },
           h("th", { class: "fr-cell--fixed", scope: "row" },
             caseLigne(`Sélectionner le dossier ${l.num}`, T.selection.has(l.num), basculer(l.num))),
           h("td", {}, h("a", { class: "fr-link", href: lienDN(l.num), target: "_blank", rel: "noopener noreferrer",
             title: `Ouvrir le dossier ${l.num} dans DN (nouvelle fenêtre)`, text: String(l.num) })),
-          cols.map((c) => h("td", {}, valeurCellule(c, l.r[c]))),
-          h("td", {}, l.labels.length
-            ? h("div", { class: "lbl-tags lbl-tags--pile" }, l.labels.map((x) => h("button", {
-              type: "button", class: `fr-tag fr-tag--sm fr-tag--dismiss ${classeCouleur(x.color)}`, disabled: S.occupe,
-              "aria-label": `Retirer le label ${x.name} du dossier ${l.num}`,
-              onclick: () => { S.modal = { type: "retrait", num: l.num, label: x }; rendu(); },
-            }, x.name)))
-            : h("span", { class: "lbl-mention", text: "—" })),
+          ordre.map((c) => (c === COL_LABELS ? celluleLabels(l)
+            : h("td", { class: c.startsWith("date_") ? "lbl-nowrap" : null }, valeurCellule(c, l.r[c])))),
           h("td", {},
             bouton("Ajouter un label", () => { S.ajoutPour = S.ajoutPour === l.num ? null : l.num; rendu(); },
               { type: "secondary", taille: "sm", ic: "plus" }),
