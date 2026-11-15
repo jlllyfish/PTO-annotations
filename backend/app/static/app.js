@@ -85,7 +85,8 @@ const S = {
   record: null,         // ligne sélectionnée dans Grist
   records: [],          // lignes transmises au widget
   onglet: "tableau",
-  tableau: { page: 1, recherche: "", filtreLabel: null, tri: "desc", colonnes: [], config: false },
+  tableau: { page: 1, recherche: "", filtreLabel: null, tri: { col: "__num", sens: "desc" }, colonnes: [], config: false,
+    selection: new Set() },
   jeton: null,
   expiration: 0,
   occupe: false,
@@ -268,12 +269,26 @@ function colonnesDisponibles() {
   return [...vues].filter((c) => !COLONNES_CACHEES.has(c) && !c.startsWith("gristHelper_")).sort();
 }
 
-const libelleColonne = (c) => { const t = c.replaceAll("_", " "); return t.charAt(0).toUpperCase() + t.slice(1); };
+// Intitulés des colonnes d'OTP, alignés sur ceux de DN ; les autres colonnes gardent leur identifiant mis en forme.
+const LIBELLES = {
+  state: "État du dossier", dossier_id: "Identifiant DN", date_depot: "Date de dépôt",
+  date_derniere_modification: "Dernière modification", date_expiration: "Date d'expiration",
+  date_traitement: "Date de traitement", date_suppression: "Date de suppression",
+  date_derniere_correction_en_attente: "Correction en attente depuis",
+  date_derniere_modification_champs: "Modification des champs", date_derniere_modification_annotations: "Modification des annotations",
+  motivation: "Motivation", suivi_par: "Suivi par", date_accuse_lecture: "Accusé de lecture", correction_instructeur: "Correction demandée",
+};
+const libelleColonne = (c) => {
+  if (LIBELLES[c]) return LIBELLES[c];
+  const t = c.replaceAll("_", " ");
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
 
 function valeurCellule(col, v) {
   if (v === null || v === undefined || v === "") return "";
   if (col === "state" && ETATS[v]) return badge(ETATS[v][0], ETATS[v][1]);
   if (v instanceof Date) return fmtDate.format(v);
+  if (typeof v === "number" && col.startsWith("date_") && v > 1e8) return dateEpoch(v);
   if (typeof v === "boolean") return v ? "Oui" : "Non";
   if (Array.isArray(v)) return v.filter((x) => x !== "L").join(", ");
   if (typeof v === "object") return JSON.stringify(v);
@@ -354,6 +369,35 @@ function filtreActif() {
     }, nom));
 }
 
+function comparer(a, b) {
+  const vide = (v) => v === null || v === undefined || v === "";
+  if (vide(a) || vide(b)) return vide(a) - vide(b);
+  if (a instanceof Date || b instanceof Date) return new Date(a) - new Date(b);
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(valeurCellule("", a)).localeCompare(String(valeurCellule("", b)), "fr", { numeric: true });
+}
+
+function enteteTriable(titre, col) {
+  const T = S.tableau;
+  const actif = T.tri.col === col;
+  const sens = actif ? (T.tri.sens === "asc" ? "ascending" : "descending") : null;
+  return h("th", { scope: "col", "aria-sort": sens || "none" },
+    h("div", { class: "fr-cell--sort" }, titre,
+      h("button", {
+        type: "button", class: "fr-btn--sort fr-btn fr-btn--sm", "aria-sort": sens,
+        title: `Trier par ${titre}`,
+        onclick: () => { T.tri = { col, sens: actif && T.tri.sens === "asc" ? "desc" : "asc" }; T.page = 1; rendu(); },
+      }, `Trier par ${titre}`)));
+}
+
+function caseACocher(libelle, coche, onchange, { indetermine = false } = {}) {
+  const id = nouvelId("sel");
+  const input = h("input", { type: "checkbox", id, checked: coche, onchange: (e) => onchange(e.target.checked) });
+  input.indeterminate = indetermine;
+  return h("div", { class: "fr-checkbox-group fr-checkbox-group--sm" }, input,
+    h("label", { class: "fr-label", for: id }, h("span", { class: "lbl-cache", text: libelle })));
+}
+
 function vueTableau() {
   const T = S.tableau;
   const toutes = S.records
@@ -363,12 +407,16 @@ function vueTableau() {
   let lignes = toutes.filter((l) => !q || String(l.num).includes(q));
   if (T.filtreLabel === "__sans") lignes = lignes.filter((l) => !l.labels.length);
   else if (T.filtreLabel) lignes = lignes.filter((l) => l.labels.some((x) => x.id === T.filtreLabel));
-  lignes.sort((a, b) => (T.tri === "asc" ? a.num - b.num : b.num - a.num));
+  const cols = T.colonnes.filter((c) => colonnesDisponibles().includes(c));
+  const cle = T.tri.col === "__num" ? (l) => l.num : T.tri.col === "__labels" ? (l) => l.labels.length : (l) => l.r[T.tri.col];
+  lignes.sort((a, b) => comparer(cle(a), cle(b)) * (T.tri.sens === "asc" ? 1 : -1));
   const pages = Math.max(1, Math.ceil(lignes.length / PAR_PAGE));
   T.page = Math.min(T.page, pages);
   const page = lignes.slice((T.page - 1) * PAR_PAGE, T.page * PAR_PAGE);
-  const cols = T.colonnes.filter((c) => colonnesDisponibles().includes(c));
   const idRecherche = nouvelId("rech");
+  const presents = new Set(toutes.map((l) => l.num));
+  for (const n of [...T.selection]) if (!presents.has(n)) T.selection.delete(n); // dossiers sortis du périmètre
+  const nbPageSel = page.filter((l) => T.selection.has(l.num)).length;
 
   const ouvrir = (l) => () => {
     grist.setCursorPos({ rowId: l.r.id }).catch(() => {});
@@ -376,26 +424,33 @@ function vueTableau() {
     S.onglet = "dossier";
     rendu();
   };
+  const basculer = (num) => (coche) => { if (coche) T.selection.add(num); else T.selection.delete(num); rendu(); };
 
-  const tableau = h("div", { class: "fr-table fr-table--sm fr-mb-0" },
+  const tableau = h("div", { class: "fr-table fr-table--bordered fr-table--multiline fr-mb-0" },
     h("div", { class: "fr-table__wrapper" }, h("div", { class: "fr-table__container" }, h("div", { class: "fr-table__content" },
       h("table", {},
         h("caption", { class: "lbl-cache", text: "Dossiers de la démarche" }),
         h("thead", {}, h("tr", {},
-          h("th", { scope: "col" }, h("button", {
-            type: "button", class: "fr-btn fr-btn--tertiary-no-outline fr-btn--sm lbl-tri",
-            "aria-label": `Trier par numéro, ordre ${T.tri === "asc" ? "décroissant" : "croissant"}`,
-            onclick: () => { T.tri = T.tri === "asc" ? "desc" : "asc"; rendu(); },
-          }, `N° dossier ${T.tri === "asc" ? "↑" : "↓"}`)),
-          h("th", { scope: "col", text: "Labels" }),
-          cols.map((c) => h("th", { scope: "col", text: libelleColonne(c) })))),
-        h("tbody", {}, page.map((l) => h("tr", {},
-          h("td", {}, h("button", { type: "button", class: "fr-link lbl-lien", onclick: ouvrir(l),
-            title: "Ouvrir dans l'onglet Dossier", text: String(l.num) })),
+          h("th", { class: "fr-cell--fixed", role: "columnheader" },
+            caseACocher("Sélectionner les dossiers de la page", page.length > 0 && nbPageSel === page.length, (c) => {
+              for (const l of page) { if (c) T.selection.add(l.num); else T.selection.delete(l.num); }
+              rendu();
+            }, { indetermine: nbPageSel > 0 && nbPageSel < page.length })),
+          enteteTriable("N° dossier", "__num"),
+          cols.map((c) => enteteTriable(libelleColonne(c), c)),
+          enteteTriable("Labels", "__labels"),
+          h("th", { scope: "col", text: "Actions" }))),
+        h("tbody", {}, page.map((l) => h("tr", { "aria-selected": T.selection.has(l.num) ? "true" : "false" },
+          h("th", { class: "fr-cell--fixed", scope: "row" },
+            caseACocher(`Sélectionner le dossier ${l.num}`, T.selection.has(l.num), basculer(l.num))),
+          h("td", {}, h("button", { type: "button", class: "fr-link lbl-lien", onclick: ouvrir(l), text: String(l.num) })),
+          cols.map((c) => h("td", {}, valeurCellule(c, l.r[c]))),
           h("td", {}, l.labels.length
-            ? h("div", { class: "lbl-tags" }, l.labels.map((x) => h("span", { class: `fr-tag fr-tag--sm ${classeCouleur(x.color)}`, text: x.name })))
+            ? h("div", { class: "lbl-tags lbl-tags--pile" },
+              l.labels.map((x) => h("span", { class: `fr-tag fr-tag--sm ${classeCouleur(x.color)}`, text: x.name })))
             : h("span", { class: "lbl-mention", text: "—" })),
-          cols.map((c) => h("td", {}, valeurCellule(c, l.r[c])))))))))));
+          h("td", {}, h("button", { type: "button", class: "fr-btn fr-btn--sm fr-btn--secondary lbl-nowrap",
+            onclick: ouvrir(l), text: "Gérer les labels" }))))))))));
 
   const pagination = pages > 1 ? h("nav", { class: "fr-pagination", "aria-label": "Pagination" },
     h("ul", { class: "fr-pagination__list" },
@@ -404,6 +459,12 @@ function vueTableau() {
       h("li", {}, h("span", { class: "fr-pagination__link", "aria-current": "page", text: `Page ${T.page} / ${pages}` })),
       h("li", {}, h("button", { type: "button", class: "fr-pagination__link fr-pagination__link--next fr-pagination__link--lg-label",
         disabled: T.page >= pages, onclick: () => { T.page++; rendu(); } }, "Suivante")))) : null;
+
+  const barreSelection = T.selection.size ? h("div", { class: "lbl-selection", role: "status" },
+    h("strong", { text: `${T.selection.size} dossier(s) sélectionné(s)` }),
+    h("div", { class: "lbl-actions" },
+      bouton("Agir en masse sur la sélection", () => { S.onglet = "masse"; S.apercu = null; S.message = null; rendu(); }),
+      bouton("Tout désélectionner", () => { T.selection.clear(); rendu(); }, { type: "tertiary" }))) : null;
 
   return [
     etatDesLieux(toutes),
@@ -418,6 +479,7 @@ function vueTableau() {
           { type: "secondary" })),
       filtreActif(),
       h("p", { class: "lbl-mention", text: `${lignes.length} dossier(s) — cliquez sur un numéro pour l'ouvrir.` }),
+      barreSelection,
       lignes.length ? tableau : h("p", { class: "lbl-mention", text: "Aucun dossier ne correspond." }),
       pagination),
   ];
@@ -478,8 +540,13 @@ function vueDossier() {
   ];
 }
 
+function perimetreMasse() {
+  const sel = [...S.tableau.selection];
+  return sel.length ? { numeros: sel, source: "selection" } : { numeros: numerosTransmis(), source: "transmis" };
+}
+
 function vueMasse() {
-  const numeros = numerosTransmis();
+  const { numeros, source } = perimetreMasse();
   const trop = numeros.length > 500;
   const a = S.apercu;
   const lab = S.catalogue.find((l) => l.id === S.masse.label);
@@ -494,8 +561,13 @@ function vueMasse() {
   return h("section", { class: "lbl-carte" },
     h("div", { class: "lbl-pile" },
       h("p", { class: "lbl-mention", text: "Périmètre" }),
-      h("h2", { class: "fr-h4 fr-mb-0", text: `${numeros.length} dossier(s) transmis au widget` }),
-      h("p", { class: "lbl-mention", text: "Les filtres de la vue du widget (ou sa liaison à une autre vue) définissent le périmètre." })),
+      h("h2", { class: "fr-h4 fr-mb-0",
+        text: source === "selection" ? `${numeros.length} dossier(s) sélectionné(s) dans le tableau` : `${numeros.length} dossier(s) transmis au widget` }),
+      source === "selection"
+        ? h("div", { class: "lbl-actions" },
+          bouton("Modifier la sélection", () => { S.onglet = "tableau"; rendu(); }, { type: "tertiary" }),
+          bouton("Utiliser tous les dossiers transmis", () => { S.tableau.selection.clear(); S.apercu = null; rendu(); }, { type: "tertiary" }))
+        : h("p", { class: "lbl-mention", text: "Cochez des dossiers dans l'onglet Tableau pour restreindre le périmètre, ou filtrez la vue du widget." })),
     trop ? alerte("warning", "Plus de 500 dossiers", "Filtrez la vue pour agir sur 500 dossiers au maximum à la fois.") : null,
     h("fieldset", { class: "fr-fieldset" },
       h("legend", { class: "fr-fieldset__legend fr-text--regular", text: "Action" }),

@@ -79,7 +79,10 @@ body { margin: 0; background: var(--background-alt-grey, #f6f6f6); }
   background-color: var(--background-action-low-blue-france); color: var(--text-action-high-blue-france); }
 .lbl-filtre-actif { align-items: center; gap: 0.5rem; }
 .lbl-filtre-actif .fr-tag { margin: 0; }
-.lbl-tri { margin: 0; font-weight: 700; }
+.lbl-tags--pile { flex-direction: column; align-items: flex-start; }
+.lbl-nowrap { white-space: nowrap; }
+.lbl-selection { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+  padding: 0.75rem 1rem; background: var(--background-contrast-info, #e8edff); }
 .lbl-lien { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: var(--text-action-high-blue-france, #000091);
   text-decoration: underline; }
 .lbl-colonnes { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); margin: 0; }
