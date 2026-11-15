@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .api.ops_routes import router as ops_router
+from .api.regles_routes import router as regles_router
 from .api.routes import router
 from .api.sync_routes import router as sync_router
 from .config import AppConfig, get_config, read_secret
@@ -132,5 +133,6 @@ def create_app(
     app.include_router(router)
     app.include_router(sync_router)
     app.include_router(ops_router)
+    app.include_router(regles_router)
     app.mount("/widget", StaticFiles(directory=STATIC, html=True), name="widget")
     return app

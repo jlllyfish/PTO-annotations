@@ -28,6 +28,12 @@ class FakeGrist:
         for num, names, js in lignes:
             self.db.execute(f'INSERT INTO "{t}" (dossier_number, label_names, labels_json) VALUES (?,?,?)', (num, names, js))
 
+    def creer_table_otp(self, table: str, cols: list[tuple[str, str]], lignes: list[dict]) -> None:
+        self._create(table, cols)
+        for l in lignes:
+            noms = ", ".join(f'"{k}"' for k in l)
+            self.db.execute(f'INSERT INTO "{table}" ({noms}) VALUES ({", ".join("?" * len(l))})', list(l.values()))
+
     def _create(self, table, cols):
         self.types[table] = dict(cols)
         defs = ", ".join(f'"{c}"' for c, _ in cols)

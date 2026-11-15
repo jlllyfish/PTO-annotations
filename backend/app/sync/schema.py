@@ -27,6 +27,14 @@ TABLES: dict[str, list[tuple[str, str]]] = {
         ("action", "Text"), ("source", "Text"), ("statut", "Text"), ("message", "Text"),
         ("cree_le", DT), ("traite_le", DT),
     ],
+    # Règles automatiques : conditions = groupes OU de conditions ET, en JSON validé par le serveur
+    "LBL_Regles": [
+        ("demarche", "Int"), ("nom", "Text"), ("action", "Text"), ("label_id", "Text"), ("label", "Text"),
+        ("mode", "Text"), ("verrou", "Bool"), ("conditions", "Text"),
+        ("modifie_le", DT), ("derniere_execution", DT), ("dernier_resultat", "Text"),
+    ],
+    # Dossiers déjà traités par chaque règle (pour ne pas refaire ce qu'une personne a défait)
+    "LBL_Regles_Traces": [("regle", "Int"), ("dossier_number", "Text")],
 }
 
 # Colonnes OTP indispensables dans Demarche_<n>_dossiers

@@ -85,6 +85,8 @@ class AppConfig(_Strict):
     dn_concurrence: int = Field(default=4, ge=1, le=8)
     # Les entrées traitées du journal plus anciennes sont supprimées automatiquement (0 = jamais)
     journal_retention_jours: int = Field(default=30, ge=0, le=3650)
+    # Autorise le mode « automatique » des règles (exécution sans intervention à chaque synchro planifiée)
+    regles_auto_autorisees: bool = True
     # Secret partagé avec n8n pour déclencher les tâches de fond (route désactivée si absent)
     task_token: str | None = Field(default=None, pattern=ENV_NAME_RE)
     documents: list[DocumentConfig] = Field(min_length=1)

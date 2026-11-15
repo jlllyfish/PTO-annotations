@@ -65,7 +65,9 @@ async def route_operations(request: Request, qui: Qui, numero: Num, demande: Dem
                                              source="manuel", cle_schema=doc)
     except LabelInconnu as exc:
         raise HTTPException(422, str(exc)) from None
-    return asdict(bilan)
+    sortie = asdict(bilan)
+    sortie.pop("statuts", None)
+    return sortie
 
 
 @router.post("/api/demarches/{numero}/operations/file/envoyer")
@@ -75,7 +77,7 @@ async def route_envoyer_file(request: Request, qui: Qui, numero: Num) -> dict:
         doc = qui.document.grist_doc_id
         bilans = await envoyer_file(client_dn(request, d), grist, d, cle_schema=doc)
         await vidange_automatique(grist, d, request.app.state.config.journal_retention_jours, cle_schema=doc)
-    return {"lots": [asdict(b) for b in bilans]}
+    return {"lots": [{k: v for k, v in asdict(b).items() if k != "statuts"} for b in bilans]}
 
 
 @router.post("/api/demarches/{numero}/operations/journal/vider")

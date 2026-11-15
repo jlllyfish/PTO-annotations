@@ -42,6 +42,7 @@ class BilanOps:
     en_file: int = 0
     grist_maj: int = 0
     details: list[dict[str, Any]] = field(default_factory=list)  # erreurs et introuvables (100 max)
+    statuts: dict[int, str] = field(default_factory=dict)        # statut final de CHAQUE dossier
 
     def ajouter_detail(self, numero: int, statut: str, message: str | None) -> None:
         if statut != "applique" and len(self.details) < 100:
@@ -165,6 +166,7 @@ async def executer(
         ])
     for n, (st, msg) in resultats.items():
         bilan.ajouter_detail(n, st, msg)
+        bilan.statuts[n] = st
     return bilan
 
 

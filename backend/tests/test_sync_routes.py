@@ -48,6 +48,12 @@ def faux_sync(monkeypatch):
         return 2
 
     monkeypatch.setattr(sync_routes, "vidange_automatique", fausse_vidange)
+
+    async def fausses_regles(dn, grist, d, *, cle_schema):
+        appels.append(("regles", d.numero))
+        return [{"regle": "Test", "bilan": None}]
+
+    monkeypatch.setattr(sync_routes, "appliquer_regles_auto", fausses_regles)
     fake.appels = appels
     return fake
 
@@ -117,6 +123,7 @@ def test_tache_planifiee(config_taches, faux_sync):
         assert r.status_code == 200
         body = r.json()
         assert body["ok"] and body["resultats"][0]["statut"] == "ok"
-        assert faux_sync.appels == [(149930, "complete", None), ("vidange", 149930, 30)]
+        assert faux_sync.appels == [(149930, "complete", None), ("regles", 149930), ("vidange", 149930, 30)]
+        assert body["resultats"][0]["bilan"]["regles"] == [{"regle": "Test", "bilan": None}]
         assert body["resultats"][0]["bilan"]["journal_purge"] == 2
         assert c.post("/api/taches/synchro?mode=ciblee", headers={"Authorization": "Bearer s3cret-n8n"}).status_code == 422

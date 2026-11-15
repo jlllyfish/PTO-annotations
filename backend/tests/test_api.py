@@ -96,3 +96,33 @@ def test_apercu_label_inconnu(api):
     body = {"action": "ajouter", "label_id": "TGFiZWwtOTk5", "numeros": [1]}
     r = api.post("/api/demarches/149930/operations/apercu", headers=AUTH, json=body)
     assert r.status_code == 422 and "n'existe pas" in r.json()["detail"]
+
+
+REGLE = {"nom": "R", "action": "ajouter", "label_id": "TGFiZWwtNTAzOTAy",
+         "groupes": [[{"champ": "d.state", "operateur": "egal", "valeur": "accepte"}]]}
+
+
+def test_regles_sans_jeton(api):
+    assert api.get("/api/demarches/149930/regles").status_code == 401
+    assert api.post("/api/demarches/149930/regles", json=REGLE).status_code == 401
+
+
+@pytest.mark.parametrize("body", [
+    {**REGLE, "inconnu": 1},
+    {**REGLE, "groupes": []},
+    {**REGLE, "groupes": [[{"champ": "d.state", "operateur": "drop", "valeur": "x"}]]},
+    {**REGLE, "mode": "toujours"},
+    {**REGLE, "nom": ""},
+])
+def test_regles_validation(api, body):
+    assert api.post("/api/demarches/149930/regles", headers=AUTH, json=body).status_code == 422
+
+
+def test_mode_auto_desactivable(config):
+    from app.config import AppConfig
+    cfg = AppConfig.model_validate({**config.model_dump(mode="json"), "regles_auto_autorisees": False})
+    app = create_app(cfg, dn_transport=Recorder(lambda r: httpx.Response(500)).transport(),
+                     grist_transport=Recorder(lambda r: httpx.Response(200, json={"tables": []})).transport())
+    with TestClient(app, base_url="https://testserver") as c:
+        r = c.post("/api/demarches/149930/regles", headers=AUTH, json={**REGLE, "mode": "auto"})
+        assert r.status_code == 403
