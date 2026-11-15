@@ -29,6 +29,7 @@ const ICONES = {
   moins: "M5 11h14v2H5z",
   reglages: "M12 1l9.5 5.5v11L12 23l-9.5-5.5v-11L12 1zm0 2.3L4.5 7.65v8.7L12 20.7l7.5-4.35v-8.7L12 3.3zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
   verifier: "M5.46 4.43A9.95 9.95 0 0 1 12 2c5.52 0 10 4.48 10 10 0 2.14-.67 4.12-1.81 5.74L17 12h3A8 8 0 0 0 6.46 6.11l-1-1.68zm13.08 15.14A9.95 9.95 0 0 1 12 22C6.48 22 2 17.52 2 12c0-2.14.67-4.12 1.81-5.74L7 12H4a8 8 0 0 0 13.54 5.89l1 1.68z",
+  haut: "M13 7.83V20h-2V7.83l-5.36 5.36-1.42-1.41L12 4l7.78 7.78-1.42 1.41z",
   externe: "M10 6v2H5v11h11v-5h2v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6zm11-3v8h-2V6.41l-7.79 7.8-1.42-1.42L17.59 5H13V3h8z",
 };
 function icone(nom) {
@@ -270,10 +271,21 @@ function enTete() {
             await chargerDemarche();
           }), { cacher: true })
         : h("span", { class: "lbl-mention", text: demarches[0] ? `${demarches[0].numero} — ${demarches[0].nom}` : "" }),
-      etat));
+      etat,
+      bouton("Synchroniser", () => action(() => lancerSynchro("incrementale")), { type: "tertiary", taille: "sm", ic: "verifier" }),
+      h("button", { type: "button", class: "fr-link fr-link--sm lbl-lien", disabled: S.occupe,
+        title: "Relit tous les dossiers de la démarche dans DN (à utiliser en cas de doute)",
+        onclick: () => action(() => lancerSynchro("complete")) }, "Relecture complète")));
 }
 
-const ONGLETS = [["dossiers", "Dossiers"], ["file", "File et journal"], ["regles", "Règles"], ["synchro", "Synchro"]];
+function etatSynchroEnCours() {
+  const t = S.synchro && S.synchro.tache;
+  if (!t || t.statut !== "en_cours") return null;
+  return h("p", { class: "lbl-mention", role: "status",
+    text: `Synchronisation (${t.mode}) : ${t.etape} — ${pluriel(t.dossiers_lus, "dossier lu", "dossiers lus")}` });
+}
+
+const ONGLETS = [["dossiers", "Dossiers"], ["file", "File et journal"], ["regles", "Règles"]];
 
 function onglets() {
   const attente = S.journal.filter((l) => l.statut === "en_attente").length;
@@ -434,7 +446,8 @@ function barreSelection(lignes) {
     rendu();
   };
   const toutesSelectionnees = lignes.length > 0 && lignes.every((l) => T.selection.has(l.num));
-  return h("div", { class: "lbl-barre-selection", role: "region", "aria-label": "Actions sur la sélection" },
+  return h("div", { class: "lbl-barre-selection", role: "region", "aria-label": "Actions sur la sélection",
+    "data-lbl-ancre": lignes.length ? "" : null },
     h("span", { class: "lbl-barre-selection__compte", text: n ? pluriel(n, "dossier sélectionné", "dossiers sélectionnés") : "0 dossier sélectionné" }),
     bouton("Ajouter un label", ouvrirMasse("ajouter"), { type: "tertiary", taille: "sm", ic: "plus", disabled: !n }),
     bouton("Retirer un label", ouvrirMasse("retirer"), { type: "tertiary", taille: "sm", ic: "moins", disabled: !n }),
@@ -615,16 +628,25 @@ function vueFile() {
   const attente = S.journal.filter((l) => l.statut === "en_attente").length;
   const idRech = nouvelId("rechj");
   return h("section", { class: "lbl-carte" },
-    h("div", { class: "lbl-entre" },
-      h("div", { class: "lbl-actions" }, filtres.map(([f, nom]) => h("button", {
-        type: "button", class: `fr-btn fr-btn--sm ${S.filtreJournal === f ? "" : "fr-btn--secondary"}`,
-        "aria-pressed": S.filtreJournal === f ? "true" : "false",
-        onclick: () => { S.filtreJournal = f; rendu(); },
-      }, `${nom} (${compte(f)})`))),
+    h("div", { class: "lbl-entre lbl-entre--centre", "data-lbl-ancre": lignes.length ? "" : null },
+      h("div", { class: "lbl-actions" },
+        bouton(`Envoyer ${pluriel(attente, "opération en attente", "opérations en attente")}`, () => action(async () => {
+          const r = await api("POST", `${base()}/operations/file/envoyer`);
+          const t = r.lots.reduce((acc, b) => ({ a: acc.a + b.appliques, d: acc.d + b.deja, e: acc.e + b.erreurs + b.introuvables }), { a: 0, d: 0, e: 0 });
+          S.message = { type: t.e ? "warning" : "success", titre: "File envoyée",
+            texte: `${t.a} appliquée(s) · ${t.d} déjà dans l'état voulu · ${t.e} erreur(s)` };
+          await chargerJournal();
+        }), { disabled: !attente }),
+        bouton("Actualiser", () => action(chargerJournal), { type: "tertiary", ic: "verifier" })),
       h("div", { class: "fr-input-group fr-mb-0 lbl-champ" },
         h("label", { class: "fr-label lbl-cache", for: idRech, text: "Filtrer par n° de dossier" }),
         h("input", { class: "fr-input", type: "search", id: idRech, placeholder: "N° de dossier", value: S.rechercheJournal,
           inputmode: "numeric", oninput: (e) => { S.rechercheJournal = e.target.value.replace(/\D/g, ""); rendu(); } }))),
+    h("div", { class: "lbl-actions" }, filtres.map(([f, nom]) => h("button", {
+      type: "button", class: `fr-btn fr-btn--sm ${S.filtreJournal === f ? "" : "fr-btn--secondary"}`,
+      "aria-pressed": S.filtreJournal === f ? "true" : "false",
+      onclick: () => { S.filtreJournal = f; rendu(); },
+    }, `${nom} (${compte(f)})`))),
     lignes.length
       ? h("div", { class: "fr-table fr-table--bordered fr-table--multiline fr-mb-0" },
         h("div", { class: "fr-table__wrapper" }, h("div", { class: "fr-table__container" }, h("div", { class: "fr-table__content" },
@@ -638,47 +660,7 @@ function vueFile() {
               h("td", { text: l.source }),
               h("td", {}, badge(...(STATUTS[l.statut] || [l.statut, ""])), l.message ? h("div", { class: "lbl-mention", text: l.message }) : null),
               h("td", { text: dateEpoch(l.traite_le || l.cree_le) })))))))))
-      : h("p", { class: "lbl-mention", text: "Aucune opération." }),
-    h("div", { class: "lbl-actions" },
-      bouton(`Envoyer ${pluriel(attente, "opération en attente", "opérations en attente")}`, () => action(async () => {
-        const r = await api("POST", `${base()}/operations/file/envoyer`);
-        const t = r.lots.reduce((acc, b) => ({ a: acc.a + b.appliques, d: acc.d + b.deja, e: acc.e + b.erreurs + b.introuvables }), { a: 0, d: 0, e: 0 });
-        S.message = { type: t.e ? "warning" : "success", titre: "File envoyée",
-          texte: `${t.a} appliquée(s) · ${t.d} déjà dans l'état voulu · ${t.e} erreur(s)` };
-        await chargerJournal();
-      }), { disabled: !attente }),
-      bouton("Actualiser", () => action(chargerJournal), { type: "tertiary" })));
-}
-
-function vueSynchro() {
-  const der = (S.synchro && S.synchro.derniere) || {};
-  const tache = S.synchro && S.synchro.tache;
-  const enCours = tache && tache.statut === "en_cours";
-  const sel = [...S.T.selection];
-  const cible = sel.length ? sel : numerosTransmis();
-  const kv = (k, v) => h("div", { class: "lbl-kv" }, h("dt", { text: k }), h("dd", { text: v }));
-  return [
-    h("section", { class: "lbl-carte" },
-      h("h2", { class: "fr-h6 fr-mb-0", text: "Synchronisation DN → Grist" }),
-      h("dl", { class: "fr-mb-0" },
-        kv("Dernière synchro", der.fin ? `${ilYa(der.fin)} (${der.mode}, ${der.statut})` : "jamais"),
-        kv("Résultat", der.statut === "erreur" ? der.message : der.fin ? `${der.dossiers_lus} lu(s), ${der.dossiers_maj} mis à jour` : "—"),
-        kv("Dernière relecture complète", der.derniere_complete ? dateEpoch(der.derniere_complete) : "jamais")),
-      h("div", { class: "lbl-actions" },
-        bouton("Synchroniser maintenant", () => action(() => lancerSynchro("incrementale"))),
-        bouton(sel.length ? `Synchroniser les ${pluriel(cible.length, "dossier sélectionné", "dossiers sélectionnés")}`
-          : `Synchroniser les ${pluriel(cible.length, "dossier transmis", "dossiers transmis")}`,
-        () => action(() => lancerSynchro("ciblee", cible)), { type: "secondary", disabled: !cible.length || cible.length > MAX_LOT }),
-        bouton("Relecture complète", () => action(() => lancerSynchro("complete")), { type: "tertiary" })),
-      enCours ? h("div", { class: "lbl-pile" },
-        h("p", { class: "lbl-mention", text: `${tache.etape} — ${tache.dossiers_lus} dossier(s) lu(s)` }),
-        h("div", { class: "lbl-progression", role: "progressbar", "aria-label": "Synchronisation en cours" },
-          h("div", { class: "lbl-progression__barre" }))) : null),
-    h("section", { class: "lbl-carte" },
-      h("h2", { class: "fr-h6 fr-mb-0", text: `Catalogue des labels — démarche ${S.demarche}` }),
-      h("div", { class: "lbl-tags" }, S.catalogue.map((l) => h("span", { class: `fr-tag ${classeCouleur(l.couleur)}`, text: l.nom }))),
-      h("p", { class: "lbl-mention", text: "Les labels se créent et se renomment dans l'administration de la démarche DN ; le catalogue est relu à chaque synchro." })),
-  ];
+      : h("p", { class: "lbl-mention", text: "Aucune opération." }));
 }
 
 function vueRegles() {
@@ -691,7 +673,7 @@ function rendu() {
   const app = document.getElementById("app");
   if (!S.contexte) return;
   compteurIds = 0; // identifiants stables d'un rendu à l'autre (restauration du focus)
-  const vues = { dossiers: vueDossiers, file: vueFile, regles: vueRegles, synchro: vueSynchro };
+  const vues = { dossiers: vueDossiers, file: vueFile, regles: vueRegles };
   const focus = document.activeElement && document.activeElement.id;
   app.replaceChildren(
     enTete(),
@@ -700,8 +682,11 @@ function rendu() {
       S.message ? alerte(S.message.type, S.message.titre, S.message.texte) : null,
       S.occupe ? h("div", { class: "lbl-progression", role: "progressbar", "aria-label": "Traitement en cours" },
         h("div", { class: "lbl-progression__barre" })) : null,
+      etatSynchroEnCours(),
       vues[S.onglet]()),
+    boutonHaut(),
     modale());
+  surveillerAncre();
   const cible = focus && document.getElementById(focus);
   if (cible) {
     cible.focus();
@@ -710,6 +695,34 @@ function rendu() {
     const premier = document.querySelector(".lbl-modal__boite select, .lbl-modal__boite button:not(.fr-btn--close)");
     if (premier) premier.focus();
   }
+}
+
+// ------------------------------------------------------------------ retour en haut
+
+// Apparaît dès que la zone d'actions marquée [data-lbl-ancre] (au-dessus d'un tableau) sort de l'écran par le haut.
+function boutonHaut() {
+  return h("button", {
+    type: "button", class: "lbl-haut", id: "lbl-haut", title: "Retour en haut", "aria-label": "Retour en haut", hidden: true,
+    onclick: () => {
+      const reduit = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      window.scrollTo({ top: 0, behavior: reduit ? "auto" : "smooth" });
+      // Le focus revient sur la première action disponible (sinon le premier champ de la page)
+      const cible = document.querySelector("[data-lbl-ancre] button:not(:disabled), [data-lbl-ancre] input")
+        || document.querySelector(".lbl-main select, .lbl-main input, .lbl-main button:not(:disabled)");
+      if (cible) cible.focus({ preventScroll: true });
+    },
+  }, icone("haut"));
+}
+
+let observateur = null;
+function surveillerAncre() {
+  if (observateur) observateur.disconnect();
+  const ancre = document.querySelector("[data-lbl-ancre]");
+  const btn = document.getElementById("lbl-haut");
+  if (!btn) return;
+  if (!ancre || !("IntersectionObserver" in window)) { btn.hidden = true; return; }
+  observateur = new IntersectionObserver(([e]) => { btn.hidden = e.isIntersecting || e.boundingClientRect.top > 0; });
+  observateur.observe(ancre);
 }
 
 // ------------------------------------------------------------------ démarrage

@@ -163,3 +163,14 @@ button.fr-tag.lbl-c--yellow-moutarde[aria-pressed=true]:not(:disabled) { backgro
 .fr-tag.lbl-c--yellow-tournesol { background-color: var(--background-action-low-yellow-tournesol); color: var(--text-action-high-yellow-tournesol); }
 button.fr-tag.lbl-c--yellow-tournesol:hover { background-color: var(--background-action-low-yellow-tournesol-hover); }
 button.fr-tag.lbl-c--yellow-tournesol[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-yellow-tournesol); color: var(--text-action-high-yellow-tournesol); }
+
+/* Retour en haut (modèle DN) */
+.lbl-haut { position: fixed; right: 1.5rem; bottom: 1.5rem; z-index: 900; display: flex; align-items: center; justify-content: center;
+  width: 2.5rem; height: 2.5rem; padding: 0; border: 2px solid var(--border-action-high-blue-france); border-radius: 50%;
+  background: var(--background-default-grey); color: var(--text-action-high-blue-france); cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 18, 0.16); }
+.lbl-haut[hidden] { display: none; }
+.lbl-haut:hover { background: var(--background-default-grey-hover); }
+.lbl-haut:focus-visible { outline: 2px solid #0a76f6; outline-offset: 2px; }
+.lbl-haut .lbl-icone { width: 1.25rem; height: 1.25rem; }
+.lbl-header .lbl-lien:disabled { color: var(--text-disabled-grey); cursor: not-allowed; text-decoration: none; }
