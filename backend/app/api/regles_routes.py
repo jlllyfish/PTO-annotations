@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 
 from ..regles import service
-from ..regles.moteur import DefinitionRegle, RegleInvalide, champs_disponibles, schema_public
+from ..regles.moteur import DefinitionRegle, RegleInvalide, champs_disponibles, schema_public, valeurs_proposees
 from .routes import Qui, client_dn, demarche_de
 
 router = APIRouter(prefix="/api/demarches/{numero}/regles")
@@ -31,6 +31,17 @@ async def schema(request: Request, qui: Qui, numero: Num) -> dict:
     async with qui.grist(request.app.state.grist_transport) as grist:
         return {**schema_public(await champs_disponibles(grist, d)),
                 "auto_autorise": request.app.state.config.regles_auto_autorisees}
+
+
+@router.get("/valeurs")
+async def valeurs(request: Request, qui: Qui, numero: Num,
+                  champ: Annotated[str, Query(min_length=1, max_length=210)]) -> dict:
+    d = demarche_de(qui, numero)
+    try:
+        async with qui.grist(request.app.state.grist_transport) as grist:
+            return await valeurs_proposees(grist, d, await champs_disponibles(grist, d), champ)
+    except RegleInvalide as exc:
+        raise _erreur(exc) from None
 
 
 @router.get("")

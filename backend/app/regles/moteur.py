@@ -8,6 +8,7 @@ Une règle est validée champ par champ contre le schéma RÉEL du document Gris
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -119,6 +120,7 @@ class Champ:
     famille: Famille
     source: str     # libellé de la source
     libelle: str
+    choix: tuple[str, ...] = ()
 
 
 # ------------------------------------------------------------------ schéma
@@ -136,7 +138,7 @@ async def champs_disponibles(grist: GristClient, d: DemarcheConfig) -> dict[str,
             if fam is None or col.id in COLONNES_TECHNIQUES or col.id.startswith("gristHelper_"):
                 continue
             ref = f"{alias}.{col.id}"
-            out[ref] = Champ(ref, alias, col.id, fam, source, col.libelle)
+            out[ref] = Champ(ref, alias, col.id, fam, source, col.libelle, col.choix)
     return out
 
 
@@ -254,3 +256,41 @@ def schema_public(champs: dict[str, Champ]) -> dict[str, Any]:
         "operateurs": {f.value: [o.value for o in ops] for f, ops in OPERATEURS.items()},
         "sans_valeur": sorted(o.value for o in SANS_VALEUR),
     }
+
+
+MAX_VALEURS = 200
+
+
+def _a_plat(v: Any) -> list[str]:
+    """Une cellule peut contenir une liste (ChoiceList stockée en JSON) : on la met à plat."""
+    if v is None or v == "":
+        return []
+    if isinstance(v, str) and v.startswith("["):
+        try:
+            liste = json.loads(v)
+            return [str(x) for x in liste if x != "L" and x not in (None, "")]
+        except ValueError:
+            pass
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return [str(v)]
+
+
+async def valeurs_proposees(grist: GristClient, d: DemarcheConfig, champs: dict[str, Champ],
+                            ref: str) -> dict[str, Any]:
+    """Valeurs à proposer pour un champ texte : choix déclarés + valeurs présentes (200 au plus)."""
+    champ = champs.get(ref)
+    if champ is None or champ.famille not in (Famille.TEXTE, Famille.NOMBRE):
+        raise RegleInvalide("pas de valeurs à proposer pour ce champ")
+    table = d.table if champ.alias == "d" else d.table_otp(dict((a, s) for a, s, _ in SOURCES)[champ.alias])
+    col = ident(champ.colonne, kind="colonne")
+    rows = await grist.sql(
+        f"SELECT DISTINCT {col} AS v FROM {ident(table)} WHERE {col} IS NOT NULL LIMIT ?",  # noqa: S608  # nosec B608
+        [MAX_VALEURS * 5],
+    )
+    valeurs = dict.fromkeys(champ.choix)
+    for r in rows:
+        for v in _a_plat(r["v"]):
+            valeurs[v] = None
+    liste = sorted(valeurs, key=lambda x: x.casefold())
+    return {"valeurs": liste[:MAX_VALEURS], "complet": len(liste) <= MAX_VALEURS}

@@ -3,7 +3,14 @@ import json
 import pytest
 
 from app.regles import service
-from app.regles.moteur import Condition, DefinitionRegle, RegleInvalide, champs_disponibles, compiler
+from app.regles.moteur import (
+    Condition,
+    DefinitionRegle,
+    RegleInvalide,
+    champs_disponibles,
+    compiler,
+    valeurs_proposees,
+)
 from app.sync import schema
 from app.sync.service import champs_otp
 
@@ -169,3 +176,22 @@ async def test_conditions_stockees_en_json_lisible():
     rid = await service.enregistrer(FakeDN({}), g, D, regle([("c.commune", "contient", "Auch")]), cle_schema="doc")
     stocke = json.loads(g.rows("LBL_Regles")[0]["conditions"])
     assert stocke == [[{"champ": "c.commune", "operateur": "contient", "valeur": "Auch"}]] and rid == 1
+
+
+@pytest.mark.anyio
+async def test_valeurs_proposees():
+    g = document()
+    g.creer_table_otp("Demarche_149930_annotations2", [("x", "Text")], [])
+    g.choix = {"Demarche_149930_champs": {"commune": ["Toulouse", "Auch"]}}
+    g.types["Demarche_149930_champs"]["tags"] = "ChoiceList"
+    g.db.execute('ALTER TABLE "Demarche_149930_champs" ADD COLUMN "tags"')
+    g.db.execute('UPDATE "Demarche_149930_champs" SET tags = ? WHERE dossier_number = ?', ['["L", "bio", "local"]', "1"])
+    champs = await champs_disponibles(g, D)
+    v = await valeurs_proposees(g, D, champs, "c.commune")
+    assert v == {"valeurs": ["100%_bio", "Albi", "Auch", "Toulouse"], "complet": True}   # choix déclarés + valeurs présentes
+    assert (await valeurs_proposees(g, D, champs, "c.tags"))["valeurs"] == ["bio", "local"]
+    assert (await valeurs_proposees(g, D, champs, "d.state"))["valeurs"] == ["accepte", "en_construction", "en_instruction"]
+    with pytest.raises(RegleInvalide):
+        await valeurs_proposees(g, D, champs, "a.relance")        # booléen : rien à proposer
+    with pytest.raises(RegleInvalide):
+        await valeurs_proposees(g, D, champs, 'c.x"; DROP')

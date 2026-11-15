@@ -121,7 +121,7 @@ const S = {
   rechercheJournal: "",
   modal: null,            // {type: "masse" | "retrait", …}
   ajoutPour: null,        // n° de dossier dont le menu « Ajouter un label » est ouvert
-  R: { schema: null, regles: [], edition: null, simulation: null, erreur: null },
+  R: { schema: null, regles: [], edition: null, simulation: null, erreur: null, valeurs: {} },
   T: {
     page: 1, recherche: "", etat: "", label: "", tri: { col: "__num", sens: "desc" },
     colonnes: [], brouillon: null, personnaliser: false, selection: new Set(),
@@ -900,6 +900,19 @@ async function enregistrerRegle() {
   await chargerRegles();
 }
 
+// Valeurs proposées pour une colonne (choix déclarés + valeurs présentes), chargées une fois par colonne.
+function valeursDe(ref) {
+  const cache = S.R.valeurs;
+  if (!(ref in cache)) {
+    cache[ref] = null; // chargement en cours
+    api("GET", `${base()}/regles/valeurs?champ=${encodeURIComponent(ref)}`)
+      .then((v) => { cache[ref] = v; })
+      .catch(() => { cache[ref] = { valeurs: [], complet: false }; })
+      .finally(() => { if (S.onglet === "regles" && S.R.edition) rendu(); });
+  }
+  return cache[ref];
+}
+
 function champValeur(c, idx) {
   const ch = champDe(c.champ);
   if (!ch || sansValeur(c.operateur)) return h("div", { class: "lbl-cond__valeur" });
@@ -916,10 +929,27 @@ function champValeur(c, idx) {
       S.catalogue.map((l) => h("option", { value: l.id, selected: l.id === c.valeur, text: l.nom })));
   } else if (c.operateur === "avant" || c.operateur === "apres") {
     champ = h("input", { class: "fr-input", type: "date", id, value: c.valeur || "", oninput: maj });
-  } else if (ch.famille === "nombre" || c.operateur === "plus_ancien_que" || c.operateur === "plus_recent_que") {
+  } else if ((ch.famille === "nombre" && c.operateur !== "egal" && c.operateur !== "different")
+    || c.operateur === "plus_ancien_que" || c.operateur === "plus_recent_que") {
     champ = h("input", { class: "fr-input", type: "number", id, value: c.valeur ?? "", min: ch.famille === "date" ? "0" : null, oninput: maj });
   } else {
-    champ = h("input", { class: "fr-input", type: "text", id, value: c.valeur ?? "", maxlength: "500", oninput: maj });
+    const v = valeursDe(c.champ);
+    const exact = c.operateur === "egal" || c.operateur === "different";
+    if (exact && v && v.complet && v.valeurs.length) {
+      // Menu déroulant des valeurs existantes ; une valeur saisie auparavant reste proposée.
+      const options = c.valeur && !v.valeurs.includes(String(c.valeur)) ? [String(c.valeur), ...v.valeurs] : v.valeurs;
+      champ = h("select", { class: "fr-select", id, onchange: (e) => { maj(e); rendu(); } },
+        h("option", { value: "", disabled: true, selected: !c.valeur, text: "Choisir une valeur" }),
+        options.map((x) => h("option", { value: x, selected: x === String(c.valeur), text: x })));
+    } else {
+      const liste = `dl-${idx}`;
+      champ = [
+        h("input", { class: "fr-input", type: ch.famille === "nombre" ? "number" : "text", id, value: c.valeur ?? "",
+          maxlength: "500", list: v && v.valeurs.length ? liste : null, oninput: maj,
+          placeholder: v === null ? "Chargement des valeurs…" : (v.valeurs.length ? "Saisir ou choisir" : "") }),
+        v && v.valeurs.length ? h("datalist", { id: liste }, v.valeurs.map((x) => h("option", { value: x }))) : null,
+      ];
+    }
   }
   return h("div", { class: "fr-input-group lbl-cond__valeur" }, h("label", { class: "fr-label lbl-cache", for: id, text: "Valeur" }), champ);
 }

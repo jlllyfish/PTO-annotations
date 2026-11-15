@@ -11,6 +11,7 @@ upsert natif `PUT /records` + `require` ; `dossier_number` est stocké en texte 
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -46,6 +47,15 @@ class Colonne:
     id: str
     type: str  # Text, Numeric, Int, Bool, Date, DateTime:<tz>, Choice, ChoiceList, Ref:<T>…
     libelle: str
+    choix: tuple[str, ...] = ()  # valeurs déclarées d'une colonne Choice / ChoiceList
+
+
+def _choix(fields: dict[str, Any]) -> tuple[str, ...]:
+    try:
+        opts = json.loads(fields.get("widgetOptions") or "{}")
+    except (ValueError, TypeError):
+        return ()
+    return tuple(str(c) for c in (opts.get("choices") or [])[:500] if isinstance(c, str | int | float))
 
 
 class GristClient:
@@ -101,7 +111,7 @@ class GristClient:
         ident(table)
         body = await self._req("GET", f"/tables/{table}/columns")
         return [
-            Colonne(c["id"], c["fields"].get("type", "Any"), c["fields"].get("label") or c["id"])
+            Colonne(c["id"], c["fields"].get("type", "Any"), c["fields"].get("label") or c["id"], _choix(c["fields"]))
             for c in body.get("columns", [])
             if not c["id"].startswith("gristHelper_")
         ]

@@ -49,7 +49,8 @@ class FakeGrist:
     async def colonnes(self, table):
         if table not in self.types:
             raise GristError("Table not found", status=404)
-        return [Colonne(c, t, c) for c, t in self.types[table].items()]
+        choix = getattr(self, "choix", {}).get(table, {})
+        return [Colonne(c, t, c, tuple(choix.get(c, ()))) for c, t in self.types[table].items()]
 
     async def sql(self, sql, args=()):
         assert sql.lstrip().upper().startswith("SELECT")
