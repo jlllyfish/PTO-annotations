@@ -214,5 +214,6 @@ button.fr-tag.lbl-c--yellow-tournesol[aria-pressed=true]:not(:disabled) { backgr
 }
 .lbl-regle-entete > .fr-select-group:not(:last-child), .lbl-regle-entete > .fr-input-group:not(:last-child),
 .lbl-cond > .fr-select-group:not(:last-child), .lbl-cond > .fr-input-group:not(:last-child) { margin-bottom: 0; }
-/* Filet supérieur des tableaux (le DSFR ne trace que les côtés et le bas des cellules) */
-.fr-table--bordered .fr-table__content table { border-top: 1px solid #929292; }
+/* Cadre complet des tableaux : le DSFR ne trace que le côté droit et le bas de chaque cellule,
+   il manquait donc le filet gauche de la première colonne et le filet du haut. */
+.fr-table--bordered .fr-table__content table { border-top: 1px solid #929292; border-left: 1px solid #929292; }
