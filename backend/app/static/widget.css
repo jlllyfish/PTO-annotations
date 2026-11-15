@@ -69,3 +69,13 @@ body { margin: 0; background: var(--background-alt-grey, #f6f6f6); }
 .lbl-cache { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .lbl-tags { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .lbl-tags .fr-tag { margin: 0; }
+
+/* Onglet Tableau */
+.lbl-tags .fr-tag[aria-pressed="true"] { outline: 2px solid var(--border-active-blue-france, #000091); outline-offset: 2px; }
+.lbl-tri { margin: 0; font-weight: 700; }
+.lbl-lien { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: var(--text-action-high-blue-france, #000091);
+  text-decoration: underline; }
+.lbl-colonnes { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); margin: 0; }
+.lbl-colonnes .fr-fieldset__element { margin-bottom: 0.25rem; }
+.fr-search-bar { flex: 1 1 18rem; max-width: 26rem; }
+.fr-table .fr-tag--sm { margin: 0; }

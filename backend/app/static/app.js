@@ -83,7 +83,8 @@ const S = {
   catalogue: [],        // [{id, nom, couleur}]
   record: null,         // ligne sélectionnée dans Grist
   records: [],          // lignes transmises au widget
-  onglet: "dossier",
+  onglet: "tableau",
+  tableau: { page: 1, recherche: "", filtreLabel: null, tri: "desc", colonnes: [], config: false },
   jeton: null,
   expiration: 0,
   occupe: false,
@@ -245,7 +246,7 @@ function enTete() {
       etat));
 }
 
-const ONGLETS = [["dossier", "Dossier"], ["masse", "En masse"], ["file", "File et journal"], ["regles", "Règles"], ["synchro", "Synchro"]];
+const ONGLETS = [["tableau", "Tableau"], ["dossier", "Dossier"], ["masse", "En masse"], ["file", "File et journal"], ["regles", "Règles"], ["synchro", "Synchro"]];
 
 function onglets() {
   const attente = S.journal.filter((l) => l.statut === "en_attente").length;
@@ -254,6 +255,156 @@ function onglets() {
       type: "button", class: "lbl-tab", role: "tab", "aria-selected": S.onglet === id ? "true" : "false",
       onclick: () => { S.onglet = id; S.message = null; if (id === "file") action(chargerJournal); else rendu(); },
     }, nom, id === "file" && attente ? h("span", { class: "lbl-compteur", text: String(attente) }) : null)));
+}
+
+// Colonnes techniques jamais proposées dans la configuration
+const COLONNES_CACHEES = new Set(["id", "manualSort", "labels_json", "label_names", "dossier_number"]);
+const PAR_PAGE = 50;
+
+function colonnesDisponibles() {
+  const vues = new Set();
+  for (const r of S.records.slice(0, 50)) for (const k of Object.keys(r)) vues.add(k);
+  return [...vues].filter((c) => !COLONNES_CACHEES.has(c) && !c.startsWith("gristHelper_")).sort();
+}
+
+const libelleColonne = (c) => { const t = c.replaceAll("_", " "); return t.charAt(0).toUpperCase() + t.slice(1); };
+
+function valeurCellule(col, v) {
+  if (v === null || v === undefined || v === "") return "";
+  if (col === "state" && ETATS[v]) return badge(ETATS[v][0], ETATS[v][1]);
+  if (v instanceof Date) return fmtDate.format(v);
+  if (typeof v === "boolean") return v ? "Oui" : "Non";
+  if (Array.isArray(v)) return v.filter((x) => x !== "L").join(", ");
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+
+function enregistrerColonnes(colonnes) {
+  S.tableau.colonnes = colonnes;
+  rendu();
+  grist.setOptions({ colonnes }).catch(() => {
+    S.message = { type: "warning", titre: "Configuration non enregistrée", texte: "Elle sera perdue au rechargement." };
+    rendu();
+  });
+}
+
+function etatDesLieux(lignes) {
+  const compte = new Map();
+  let sans = 0;
+  for (const l of lignes) {
+    if (!l.labels.length) sans++;
+    for (const x of l.labels) compte.set(x.id, (compte.get(x.id) || 0) + 1);
+  }
+  const connus = new Set(S.catalogue.map((c) => c.id));
+  const items = S.catalogue.map((c) => ({ id: c.id, nom: c.nom, couleur: c.couleur, n: compte.get(c.id) || 0 }));
+  for (const l of lignes) for (const x of l.labels) {
+    if (!connus.has(x.id)) { connus.add(x.id); items.push({ id: x.id, nom: `${x.name} (hors catalogue)`, couleur: x.color, n: compte.get(x.id) }); }
+  }
+  const actif = S.tableau.filtreLabel;
+  const filtre = (id) => () => { S.tableau.filtreLabel = actif === id ? null : id; S.tableau.page = 1; rendu(); };
+  return h("section", { class: "lbl-carte" },
+    h("h2", { class: "fr-h5 fr-mb-0", text: "État des lieux des labels" }),
+    h("div", { class: "lbl-stats" },
+      h("div", { class: "lbl-stat lbl-stat--fort" }, h("strong", { text: String(lignes.length) }), h("span", { text: "dossiers" })),
+      h("div", { class: "lbl-stat" }, h("strong", { text: String(lignes.length - sans) }), h("span", { text: "avec au moins un label" })),
+      h("div", { class: "lbl-stat" }, h("strong", { text: String(sans) }), h("span", { text: "sans label" }))),
+    h("div", { class: "lbl-tags", role: "group", "aria-label": "Filtrer par label" },
+      items.map((it) => h("button", {
+        type: "button", class: `fr-tag ${classeCouleur(it.couleur)}`, "aria-pressed": actif === it.id ? "true" : "false",
+        onclick: filtre(it.id),
+      }, `${it.nom} · ${it.n}`)),
+      h("button", { type: "button", class: "fr-tag", "aria-pressed": actif === "__sans" ? "true" : "false",
+        onclick: filtre("__sans") }, `Sans label · ${sans}`)),
+    h("p", { class: "lbl-mention", text: "Cliquez sur un label pour filtrer le tableau ; recliquez pour retirer le filtre." }));
+}
+
+function configColonnes() {
+  const dispo = colonnesDisponibles();
+  const choisies = S.tableau.colonnes;
+  return h("section", { class: "lbl-carte" },
+    h("div", { class: "lbl-entre" },
+      h("h3", { class: "fr-h6 fr-mb-0", text: "Colonnes affichées" }),
+      bouton("Fermer", () => { S.tableau.config = false; rendu(); }, { type: "tertiary" })),
+    h("p", { class: "lbl-mention", text: "Le numéro et les labels sont toujours affichés. Le choix est enregistré dans le document Grist." }),
+    dispo.length
+      ? h("fieldset", { class: "fr-fieldset lbl-colonnes" },
+        h("legend", { class: "lbl-cache", text: "Colonnes à afficher" }),
+        dispo.map((c) => {
+          const id = nouvelId("col");
+          return h("div", { class: "fr-fieldset__element" }, h("div", { class: "fr-checkbox-group fr-checkbox-group--sm" },
+            h("input", { type: "checkbox", id, checked: choisies.includes(c),
+              onchange: (e) => enregistrerColonnes(e.target.checked ? [...choisies, c] : choisies.filter((x) => x !== c)) }),
+            h("label", { class: "fr-label", for: id, text: libelleColonne(c) })));
+        }))
+      : h("p", { class: "lbl-mention", text: "Aucune autre colonne transmise au widget." }));
+}
+
+function vueTableau() {
+  const T = S.tableau;
+  const toutes = S.records
+    .map((r) => ({ r, num: numeroDe(r), labels: labelsDuRecord(r) }))
+    .filter((l) => l.num);
+  const q = T.recherche.trim();
+  let lignes = toutes.filter((l) => !q || String(l.num).includes(q));
+  if (T.filtreLabel === "__sans") lignes = lignes.filter((l) => !l.labels.length);
+  else if (T.filtreLabel) lignes = lignes.filter((l) => l.labels.some((x) => x.id === T.filtreLabel));
+  lignes.sort((a, b) => (T.tri === "asc" ? a.num - b.num : b.num - a.num));
+  const pages = Math.max(1, Math.ceil(lignes.length / PAR_PAGE));
+  T.page = Math.min(T.page, pages);
+  const page = lignes.slice((T.page - 1) * PAR_PAGE, T.page * PAR_PAGE);
+  const cols = T.colonnes.filter((c) => colonnesDisponibles().includes(c));
+  const idRecherche = nouvelId("rech");
+
+  const ouvrir = (l) => () => {
+    grist.setCursorPos({ rowId: l.r.id }).catch(() => {});
+    S.record = l.r;
+    S.onglet = "dossier";
+    rendu();
+  };
+
+  const tableau = h("div", { class: "fr-table fr-table--sm fr-mb-0" },
+    h("div", { class: "fr-table__wrapper" }, h("div", { class: "fr-table__container" }, h("div", { class: "fr-table__content" },
+      h("table", {},
+        h("caption", { class: "lbl-cache", text: "Dossiers de la démarche" }),
+        h("thead", {}, h("tr", {},
+          h("th", { scope: "col" }, h("button", {
+            type: "button", class: "fr-btn fr-btn--tertiary-no-outline fr-btn--sm lbl-tri",
+            "aria-label": `Trier par numéro, ordre ${T.tri === "asc" ? "décroissant" : "croissant"}`,
+            onclick: () => { T.tri = T.tri === "asc" ? "desc" : "asc"; rendu(); },
+          }, `N° dossier ${T.tri === "asc" ? "↑" : "↓"}`)),
+          h("th", { scope: "col", text: "Labels" }),
+          cols.map((c) => h("th", { scope: "col", text: libelleColonne(c) })))),
+        h("tbody", {}, page.map((l) => h("tr", {},
+          h("td", {}, h("button", { type: "button", class: "fr-link lbl-lien", onclick: ouvrir(l),
+            title: "Ouvrir dans l'onglet Dossier", text: String(l.num) })),
+          h("td", {}, l.labels.length
+            ? h("div", { class: "lbl-tags" }, l.labels.map((x) => h("span", { class: `fr-tag fr-tag--sm ${classeCouleur(x.color)}`, text: x.name })))
+            : h("span", { class: "lbl-mention", text: "—" })),
+          cols.map((c) => h("td", {}, valeurCellule(c, l.r[c])))))))))));
+
+  const pagination = pages > 1 ? h("nav", { class: "fr-pagination", "aria-label": "Pagination" },
+    h("ul", { class: "fr-pagination__list" },
+      h("li", {}, h("button", { type: "button", class: "fr-pagination__link fr-pagination__link--prev fr-pagination__link--lg-label",
+        disabled: T.page <= 1, onclick: () => { T.page--; rendu(); } }, "Précédente")),
+      h("li", {}, h("span", { class: "fr-pagination__link", "aria-current": "page", text: `Page ${T.page} / ${pages}` })),
+      h("li", {}, h("button", { type: "button", class: "fr-pagination__link fr-pagination__link--next fr-pagination__link--lg-label",
+        disabled: T.page >= pages, onclick: () => { T.page++; rendu(); } }, "Suivante")))) : null;
+
+  return [
+    etatDesLieux(toutes),
+    T.config ? configColonnes() : null,
+    h("section", { class: "lbl-carte" },
+      h("div", { class: "lbl-entre" },
+        h("div", { class: "fr-search-bar", role: "search" },
+          h("label", { class: "fr-label", for: idRecherche, text: "Rechercher un numéro de dossier" }),
+          h("input", { class: "fr-input", type: "search", id: idRecherche, placeholder: "N° de dossier", value: T.recherche,
+            oninput: (e) => { T.recherche = e.target.value.replace(/\D/g, ""); T.page = 1; rendu(); } })),
+        bouton(T.config ? "Masquer la configuration" : "Configurer les colonnes", () => { T.config = !T.config; rendu(); },
+          { type: "secondary" })),
+      h("p", { class: "lbl-mention", text: `${lignes.length} dossier(s)${T.filtreLabel ? " (filtrés par label)" : ""} — cliquez sur un numéro pour l'ouvrir.` }),
+      lignes.length ? tableau : h("p", { class: "lbl-mention", text: "Aucun dossier ne correspond." }),
+      pagination),
+  ];
 }
 
 function vueDossier() {
@@ -451,7 +602,7 @@ function rendu() {
   const app = document.getElementById("app");
   if (!S.contexte) return;
   compteurIds = 0; // identifiants stables d'un rendu à l'autre (restauration du focus)
-  const vues = { dossier: vueDossier, masse: vueMasse, file: vueFile, regles: vueRegles, synchro: vueSynchro };
+  const vues = { tableau: vueTableau, dossier: vueDossier, masse: vueMasse, file: vueFile, regles: vueRegles, synchro: vueSynchro };
   const focus = document.activeElement && document.activeElement.id;
   app.replaceChildren(
     enTete(),
@@ -462,7 +613,13 @@ function rendu() {
         h("div", { class: "lbl-progression__barre" })) : null,
       vues[S.onglet]()),
     modale());
-  if (focus) { const el = document.getElementById(focus); if (el) el.focus(); }
+  if (focus) {
+    const el = document.getElementById(focus);
+    if (el) {
+      el.focus();
+      if (el.tagName === "INPUT" && el.type !== "checkbox" && el.type !== "radio") el.setSelectionRange?.(el.value.length, el.value.length);
+    }
+  }
 }
 
 // ------------------------------------------------------------------ démarrage
@@ -485,6 +642,11 @@ async function demarrer() {
 }
 
 grist.ready({ requiredAccess: "full", allowSelectBy: false });
+grist.onOptions((options) => {
+  const c = options && Array.isArray(options.colonnes) ? options.colonnes : [];
+  S.tableau.colonnes = c.filter((x) => typeof x === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,99}$/.test(x));
+  rendu();
+});
 grist.onRecord((rec) => { S.record = rec; if (S.onglet === "dossier") rendu(); });
 grist.onRecords((recs) => { S.records = recs || []; if (S.onglet !== "dossier") rendu(); });
 demarrer();
