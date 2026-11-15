@@ -122,7 +122,7 @@ const S = {
   ajoutPour: null,        // n° de dossier dont le menu « Ajouter un label » est ouvert
   T: {
     page: 1, recherche: "", etat: "", label: "", tri: { col: "__num", sens: "desc" },
-    colonnes: [], personnaliser: false, selection: new Set(),
+    colonnes: [], brouillon: null, personnaliser: false, selection: new Set(),
   },
 };
 
@@ -331,7 +331,8 @@ const COL_LABELS = "__labels";
 // Colonnes affichées dans l'ordre choisi ; la colonne Labels est toujours présente (en dernier par défaut).
 function colonnesAffichees() {
   const dispo = new Set(colonnesDisponibles());
-  const ordre = S.T.colonnes.filter((c) => c === COL_LABELS || dispo.has(c));
+  const source = S.T.brouillon || S.T.colonnes; // le brouillon est prévisualisé en direct pendant la personnalisation
+  const ordre = source.filter((c) => c === COL_LABELS || dispo.has(c));
   if (!ordre.includes(COL_LABELS)) ordre.push(COL_LABELS);
   return ordre;
 }
@@ -355,10 +356,32 @@ function comparer(a, b) {
   return String(valeurCellule("", a)).localeCompare(String(valeurCellule("", b)), "fr", { numeric: true });
 }
 
+// Modifie le brouillon (aperçu immédiat dans le tableau) ; rien n'est enregistré avant « Enregistrer ».
 function enregistrerColonnes(colonnes) {
-  S.T.colonnes = colonnes;
+  S.T.brouillon = colonnes;
   rendu();
-  grist.setOptions({ colonnes }).catch(() => {
+}
+
+function ouvrirPersonnaliser() {
+  S.T.brouillon = colonnesAffichees();
+  S.T.personnaliser = true;
+  rendu();
+}
+
+function fermerPersonnaliser() {
+  S.T.brouillon = null;
+  S.T.personnaliser = false;
+  rendu();
+}
+
+function sauverPersonnaliser() {
+  const colonnes = S.T.brouillon || S.T.colonnes;
+  S.T.colonnes = colonnes;
+  fermerPersonnaliser();
+  grist.setOptions({ colonnes }).then(() => {
+    S.message = { type: "success", titre: "Tableau enregistré", texte: "Les colonnes et leur ordre sont conservés dans le document Grist." };
+    rendu();
+  }).catch(() => {
     S.message = { type: "warning", titre: "Configuration non enregistrée", texte: "Elle sera perdue au rechargement." };
     rendu();
   });
@@ -438,7 +461,7 @@ function panneauPersonnaliser() {
             : petitBouton(`ord-x-${c}`, `Masquer la colonne ${nom(c)}`, "fermer", () => enregistrerColonnes(ordre.filter((x) => x !== c)), false)))))),
     h("div", { class: "lbl-personnaliser__col" },
       h("h3", { class: "fr-text--md fr-text--bold fr-mb-0", text: "Colonnes disponibles" }),
-      h("p", { class: "lbl-mention", text: "Cochez une colonne pour l'ajouter en fin de tableau. Le choix est enregistré dans le document Grist." }),
+      h("p", { class: "lbl-mention", text: "Cochez une colonne pour l'ajouter en fin de tableau." }),
       autres.length
         ? h("fieldset", { class: "fr-fieldset lbl-colonnes" },
           h("legend", { class: "lbl-cache", text: "Colonnes à ajouter" }),
@@ -448,7 +471,12 @@ function panneauPersonnaliser() {
               h("input", { type: "checkbox", id, onchange: () => enregistrerColonnes([...ordre, c]) }),
               h("label", { class: "fr-label", for: id, text: libelleColonne(c) })));
           }))
-        : h("p", { class: "lbl-mention", text: "Toutes les colonnes sont affichées." })));
+        : h("p", { class: "lbl-mention", text: "Toutes les colonnes sont affichées." })),
+    h("div", { class: "lbl-personnaliser__pied" },
+      h("p", { class: "lbl-mention", text: "Le tableau montre déjà vos changements. Enregistrez pour les conserver dans le document Grist." }),
+      h("div", { class: "lbl-actions" },
+        bouton("Annuler", fermerPersonnaliser, { type: "secondary", taille: "sm" }),
+        bouton("Enregistrer", sauverPersonnaliser, { taille: "sm" }))));
 }
 
 function caseLigne(libelle, coche, onchange, { indetermine = false } = {}) {
@@ -571,7 +599,7 @@ function vueDossiers() {
       h("h2", { class: "fr-h4 fr-mb-0", text: pluriel(lignes.length, "dossier", "dossiers") }),
       h("button", {
         type: "button", class: "fr-btn fr-btn--tertiary fr-btn--sm lbl-btn", "aria-expanded": T.personnaliser ? "true" : "false",
-        onclick: () => { T.personnaliser = !T.personnaliser; rendu(); },
+        onclick: () => (T.personnaliser ? fermerPersonnaliser() : ouvrirPersonnaliser()),
       }, icone("reglages"), "Personnaliser le tableau")),
     T.personnaliser ? panneauPersonnaliser() : null,
     h("div", { class: "lbl-bloc-tableau" },
@@ -793,6 +821,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (S.modal) fermerModal();
   else if (S.ajoutPour !== null) { S.ajoutPour = null; rendu(); }
+  else if (S.T.personnaliser) fermerPersonnaliser();
 });
 
 grist.ready({ requiredAccess: "full", allowSelectBy: false });

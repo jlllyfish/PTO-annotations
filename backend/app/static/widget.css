@@ -188,3 +188,5 @@ button.fr-tag.lbl-c--yellow-tournesol[aria-pressed=true]:not(:disabled) { backgr
 .lbl-tableau .fr-tag, .lbl-tableau .fr-badge { white-space: nowrap; }
 .lbl-tableau .lbl-tags--pile { min-width: max-content; }
 .lbl-tableau td > .fr-link, .lbl-tableau td.lbl-nowrap { white-space: nowrap; }
+.lbl-personnaliser__pied { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  flex-wrap: wrap; padding-top: 1rem; border-top: 1px solid var(--border-default-grey); }
