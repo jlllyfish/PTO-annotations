@@ -79,3 +79,59 @@ body { margin: 0; background: var(--background-alt-grey, #f6f6f6); }
 .lbl-colonnes .fr-fieldset__element { margin-bottom: 0.25rem; }
 .fr-search-bar { flex: 1 1 18rem; max-width: 26rem; }
 .fr-table .fr-tag--sm { margin: 0; }
+
+/* Couleurs des labels DN (palette DSFR) : valables pour tout élément, y compris les tags non cliquables
+   et les tags « retirables », que le DSFR ne colore pas. */
+.fr-tag.lbl-c--beige-gris-galet, .lbl-pastille.lbl-c--beige-gris-galet { background-color: var(--background-action-low-beige-gris-galet); color: var(--text-action-high-beige-gris-galet); }
+button.fr-tag.lbl-c--beige-gris-galet:hover { background-color: var(--background-action-low-beige-gris-galet-hover); }
+.fr-tag.lbl-c--blue-cumulus, .lbl-pastille.lbl-c--blue-cumulus { background-color: var(--background-action-low-blue-cumulus); color: var(--text-action-high-blue-cumulus); }
+button.fr-tag.lbl-c--blue-cumulus:hover { background-color: var(--background-action-low-blue-cumulus-hover); }
+.fr-tag.lbl-c--blue-ecume, .lbl-pastille.lbl-c--blue-ecume { background-color: var(--background-action-low-blue-ecume); color: var(--text-action-high-blue-ecume); }
+button.fr-tag.lbl-c--blue-ecume:hover { background-color: var(--background-action-low-blue-ecume-hover); }
+.fr-tag.lbl-c--brown-cafe-creme, .lbl-pastille.lbl-c--brown-cafe-creme { background-color: var(--background-action-low-brown-cafe-creme); color: var(--text-action-high-brown-cafe-creme); }
+button.fr-tag.lbl-c--brown-cafe-creme:hover { background-color: var(--background-action-low-brown-cafe-creme-hover); }
+.fr-tag.lbl-c--brown-caramel, .lbl-pastille.lbl-c--brown-caramel { background-color: var(--background-action-low-brown-caramel); color: var(--text-action-high-brown-caramel); }
+button.fr-tag.lbl-c--brown-caramel:hover { background-color: var(--background-action-low-brown-caramel-hover); }
+.fr-tag.lbl-c--brown-opera, .lbl-pastille.lbl-c--brown-opera { background-color: var(--background-action-low-brown-opera); color: var(--text-action-high-brown-opera); }
+button.fr-tag.lbl-c--brown-opera:hover { background-color: var(--background-action-low-brown-opera-hover); }
+.fr-tag.lbl-c--green-archipel, .lbl-pastille.lbl-c--green-archipel { background-color: var(--background-action-low-green-archipel); color: var(--text-action-high-green-archipel); }
+button.fr-tag.lbl-c--green-archipel:hover { background-color: var(--background-action-low-green-archipel-hover); }
+.fr-tag.lbl-c--green-bourgeon, .lbl-pastille.lbl-c--green-bourgeon { background-color: var(--background-action-low-green-bourgeon); color: var(--text-action-high-green-bourgeon); }
+button.fr-tag.lbl-c--green-bourgeon:hover { background-color: var(--background-action-low-green-bourgeon-hover); }
+.fr-tag.lbl-c--green-emeraude, .lbl-pastille.lbl-c--green-emeraude { background-color: var(--background-action-low-green-emeraude); color: var(--text-action-high-green-emeraude); }
+button.fr-tag.lbl-c--green-emeraude:hover { background-color: var(--background-action-low-green-emeraude-hover); }
+.fr-tag.lbl-c--green-menthe, .lbl-pastille.lbl-c--green-menthe { background-color: var(--background-action-low-green-menthe); color: var(--text-action-high-green-menthe); }
+button.fr-tag.lbl-c--green-menthe:hover { background-color: var(--background-action-low-green-menthe-hover); }
+.fr-tag.lbl-c--green-tilleul-verveine, .lbl-pastille.lbl-c--green-tilleul-verveine { background-color: var(--background-action-low-green-tilleul-verveine); color: var(--text-action-high-green-tilleul-verveine); }
+button.fr-tag.lbl-c--green-tilleul-verveine:hover { background-color: var(--background-action-low-green-tilleul-verveine-hover); }
+.fr-tag.lbl-c--orange-terre-battue, .lbl-pastille.lbl-c--orange-terre-battue { background-color: var(--background-action-low-orange-terre-battue); color: var(--text-action-high-orange-terre-battue); }
+button.fr-tag.lbl-c--orange-terre-battue:hover { background-color: var(--background-action-low-orange-terre-battue-hover); }
+.fr-tag.lbl-c--pink-macaron, .lbl-pastille.lbl-c--pink-macaron { background-color: var(--background-action-low-pink-macaron); color: var(--text-action-high-pink-macaron); }
+button.fr-tag.lbl-c--pink-macaron:hover { background-color: var(--background-action-low-pink-macaron-hover); }
+.fr-tag.lbl-c--pink-tuile, .lbl-pastille.lbl-c--pink-tuile { background-color: var(--background-action-low-pink-tuile); color: var(--text-action-high-pink-tuile); }
+button.fr-tag.lbl-c--pink-tuile:hover { background-color: var(--background-action-low-pink-tuile-hover); }
+.fr-tag.lbl-c--purple-glycine, .lbl-pastille.lbl-c--purple-glycine { background-color: var(--background-action-low-purple-glycine); color: var(--text-action-high-purple-glycine); }
+button.fr-tag.lbl-c--purple-glycine:hover { background-color: var(--background-action-low-purple-glycine-hover); }
+.fr-tag.lbl-c--yellow-moutarde, .lbl-pastille.lbl-c--yellow-moutarde { background-color: var(--background-action-low-yellow-moutarde); color: var(--text-action-high-yellow-moutarde); }
+button.fr-tag.lbl-c--yellow-moutarde:hover { background-color: var(--background-action-low-yellow-moutarde-hover); }
+.fr-tag.lbl-c--yellow-tournesol, .lbl-pastille.lbl-c--yellow-tournesol { background-color: var(--background-action-low-yellow-tournesol); color: var(--text-action-high-yellow-tournesol); }
+button.fr-tag.lbl-c--yellow-tournesol:hover { background-color: var(--background-action-low-yellow-tournesol-hover); }
+.fr-tag--dismiss[class*="lbl-c--"]::after { color: inherit; }
+/* Filtre actif : on garde la couleur du label (le DSFR la remplace par du bleu) ; la coche reste visible. */
+button.fr-tag.lbl-c--beige-gris-galet[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-beige-gris-galet); color: var(--text-action-high-beige-gris-galet); }
+button.fr-tag.lbl-c--blue-cumulus[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-blue-cumulus); color: var(--text-action-high-blue-cumulus); }
+button.fr-tag.lbl-c--blue-ecume[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-blue-ecume); color: var(--text-action-high-blue-ecume); }
+button.fr-tag.lbl-c--brown-cafe-creme[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-brown-cafe-creme); color: var(--text-action-high-brown-cafe-creme); }
+button.fr-tag.lbl-c--brown-caramel[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-brown-caramel); color: var(--text-action-high-brown-caramel); }
+button.fr-tag.lbl-c--brown-opera[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-brown-opera); color: var(--text-action-high-brown-opera); }
+button.fr-tag.lbl-c--green-archipel[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-green-archipel); color: var(--text-action-high-green-archipel); }
+button.fr-tag.lbl-c--green-bourgeon[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-green-bourgeon); color: var(--text-action-high-green-bourgeon); }
+button.fr-tag.lbl-c--green-emeraude[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-green-emeraude); color: var(--text-action-high-green-emeraude); }
+button.fr-tag.lbl-c--green-menthe[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-green-menthe); color: var(--text-action-high-green-menthe); }
+button.fr-tag.lbl-c--green-tilleul-verveine[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-green-tilleul-verveine); color: var(--text-action-high-green-tilleul-verveine); }
+button.fr-tag.lbl-c--orange-terre-battue[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-orange-terre-battue); color: var(--text-action-high-orange-terre-battue); }
+button.fr-tag.lbl-c--pink-macaron[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-pink-macaron); color: var(--text-action-high-pink-macaron); }
+button.fr-tag.lbl-c--pink-tuile[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-pink-tuile); color: var(--text-action-high-pink-tuile); }
+button.fr-tag.lbl-c--purple-glycine[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-purple-glycine); color: var(--text-action-high-purple-glycine); }
+button.fr-tag.lbl-c--yellow-moutarde[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-yellow-moutarde); color: var(--text-action-high-yellow-moutarde); }
+button.fr-tag.lbl-c--yellow-tournesol[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-yellow-tournesol); color: var(--text-action-high-yellow-tournesol); }

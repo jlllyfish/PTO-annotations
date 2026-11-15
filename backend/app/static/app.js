@@ -73,7 +73,8 @@ const STATUTS = {
 };
 const badge = (texte, cls) => h("span", { class: `fr-badge fr-badge--sm fr-badge--no-icon ${cls || ""}`, text: texte });
 const COULEUR_RE = /^[a-z]+(_[a-z]+)*$/;
-const classeCouleur = (c) => (COULEUR_RE.test(c || "") ? `fr-tag--${c.replaceAll("_", "-")}` : "");
+// Couleur DN (ex. « purple_glycine ») → classe du widget (ex. « lbl-c--purple-glycine »), voir widget.css
+const classeCouleur = (c) => (COULEUR_RE.test(c || "") ? `lbl-c--${c.replaceAll("_", "-")}` : "");
 
 // ------------------------------------------------------------------ état et API
 
