@@ -11,6 +11,8 @@ dn_concurrence: 4
 task_token: LBL_TASK_TOKEN
 # Entrées traitées du journal supprimées après ce nombre de jours (0 = jamais ; la file n'est jamais vidée)
 journal_retention_jours: 30
+# Autorise le mode « automatique » des règles (exécution à chaque synchro planifiée)
+regles_auto_autorisees: true
 
 documents:
   - grist_doc_id: AbCdEfGh1234          # Paramètres du document Grist › API

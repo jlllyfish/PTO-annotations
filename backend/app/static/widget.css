@@ -192,3 +192,25 @@ button.fr-tag.lbl-c--yellow-tournesol[aria-pressed=true]:not(:disabled) { backgr
 .lbl-personnaliser__pied { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 1rem;
   flex-wrap: wrap; padding-top: 1rem; border-top: 1px solid var(--border-default-grey); }
 @media (max-width: 48em) { .lbl-personnaliser { grid-template-columns: 1fr; } }
+
+/* Onglet Règles */
+.lbl-regle-entete { display: grid; grid-template-columns: minmax(14rem, 2fr) minmax(12rem, 1fr) minmax(12rem, 1fr); gap: 1rem 1.5rem; align-items: end; }
+.lbl-regle-entete > * { margin: 0; }
+.lbl-groupe { display: flex; flex-direction: column; gap: 0.75rem; padding: 1rem; background: var(--background-alt-blue-france);
+  border: 1px solid var(--border-default-blue-france); }
+.lbl-groupe__titre { margin: 0; font-size: 0.875rem; font-weight: 700; color: var(--text-action-high-blue-france); }
+.lbl-groupe > .fr-btn { align-self: flex-start; }
+.lbl-cond { display: grid; grid-template-columns: minmax(12rem, 1.4fr) minmax(10rem, 1fr) minmax(10rem, 1fr) 2.5rem; gap: 0.5rem; align-items: end; }
+.lbl-cond > * { margin: 0; }
+.lbl-cond .fr-select, .lbl-cond .fr-input { margin-top: 0; background-color: var(--background-default-grey); }
+.lbl-cond .lbl-btn-icone { align-self: center; }
+.lbl-ou { display: flex; align-items: center; gap: 0.75rem; color: var(--text-action-high-blue-france); font-weight: 700; font-size: 0.875rem; }
+.lbl-ou::before, .lbl-ou::after { content: ""; flex: 1; height: 1px; background: var(--border-default-blue-france); }
+.lbl-ligne--centre { align-items: center; gap: 0.5rem; margin-top: 0.25rem; }
+.lbl-resume { min-width: 16rem; }
+.lbl-actions-ligne { display: flex; align-items: center; gap: 0.5rem; flex-wrap: nowrap; }
+@media (max-width: 48em) {
+  .lbl-regle-entete, .lbl-cond { grid-template-columns: 1fr; }
+}
+.lbl-regle-entete > .fr-select-group:not(:last-child), .lbl-regle-entete > .fr-input-group:not(:last-child),
+.lbl-cond > .fr-select-group:not(:last-child), .lbl-cond > .fr-input-group:not(:last-child) { margin-bottom: 0; }

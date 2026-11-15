@@ -121,6 +121,7 @@ const S = {
   rechercheJournal: "",
   modal: null,            // {type: "masse" | "retrait", …}
   ajoutPour: null,        // n° de dossier dont le menu « Ajouter un label » est ouvert
+  R: { schema: null, regles: [], edition: null, simulation: null, erreur: null },
   T: {
     page: 1, recherche: "", etat: "", label: "", tri: { col: "__num", sens: "desc" },
     colonnes: [], brouillon: null, personnaliser: false, selection: new Set(),
@@ -296,7 +297,13 @@ function onglets() {
   return h("nav", { class: "lbl-tabs", role: "tablist", "aria-label": "Sections du widget" },
     ONGLETS.map(([id, nom]) => h("button", {
       type: "button", class: "lbl-tab", role: "tab", "aria-selected": S.onglet === id ? "true" : "false",
-      onclick: () => { S.onglet = id; S.message = null; if (id === "file") action(chargerJournal); else rendu(); },
+      onclick: () => {
+        S.onglet = id;
+        S.message = null;
+        if (id === "file") action(chargerJournal);
+        else if (id === "regles") action(chargerRegles);
+        else rendu();
+      },
     }, nom, id === "file" && attente ? h("span", { class: "lbl-compteur", text: String(attente) }) : null)));
 }
 
@@ -635,7 +642,40 @@ function modale() {
   const m = S.modal;
   if (!m) return null;
   let titre, corps, actions;
-  if (m.type === "vider") {
+  if (m.type === "regle") {
+    const d = m.regle.definition;
+    const sim = m.sim;
+    titre = `Appliquer « ${d.nom} »`;
+    corps = [
+      h("p", {}, `${d.action === "ajouter" ? "Ajouter" : "Retirer"} le label « ${nomLabel(d.label_id)} » sur `,
+        h("strong", { text: pluriel(sim.a_faire, "dossier", "dossiers") }), " maintenant."),
+      h("p", { class: "lbl-mention", text: `${pluriel(sim.correspondants, "dossier remplit", "dossiers remplissent")} les conditions · ${sim.deja} déjà dans l'état voulu`
+        + (sim.verrouilles ? ` · ${sim.verrouilles} laissé(s) de côté (modifiés à la main)` : "") + ". 500 dossiers au plus par passage." }),
+    ];
+    actions = [bouton("Annuler", fermerModal, { type: "secondary" }),
+      bouton("Appliquer", () => {
+        const id = m.regle.id;
+        S.modal = null;
+        action(async () => {
+          const r = await api("POST", `${base()}/regles/${id}/appliquer`);
+          S.message = r.bilan ? messageBilan(r.bilan) : { type: "info", titre: "Rien à faire", texte: "Aucun dossier à traiter." };
+          await chargerRegles();
+          await chargerJournal();
+        });
+      }, { disabled: !sim.a_faire })];
+  } else if (m.type === "suppr-regle") {
+    const d = m.regle.definition || { nom: "?" };
+    titre = "Supprimer la règle";
+    corps = [h("p", {}, "Supprimer la règle ", h("strong", { text: `« ${d.nom} »` }), " ?"),
+      h("p", { class: "lbl-mention", text: "Les labels déjà posés ou retirés par cette règle ne changent pas." })];
+    actions = [bouton("Annuler", fermerModal, { type: "secondary" }),
+      bouton("Supprimer", () => {
+        const id = m.regle.id;
+        S.modal = null;
+        action(async () => { await api("DELETE", `${base()}/regles/${id}`); await chargerRegles();
+          S.message = { type: "success", titre: "Règle supprimée", texte: `« ${d.nom} »` }; });
+      })];
+  } else if (m.type === "vider") {
     const traitees = S.journal.filter((l) => l.statut !== "en_attente").length;
     const attente = S.journal.length - traitees;
     titre = "Vider le journal";
@@ -766,8 +806,255 @@ function vueFile() {
       : h("p", { class: "lbl-mention", text: "Aucune opération." }));
 }
 
+// ------------------------------------------------------------------ onglet Règles
+
+const LIB_OPS = {
+  egal: "est égal à", different: "est différent de", contient: "contient", ne_contient_pas: "ne contient pas",
+  sup: "est supérieur à", sup_egal: "est supérieur ou égal à", inf: "est inférieur à", inf_egal: "est inférieur ou égal à",
+  plus_ancien_que: "plus ancien que (jours)", plus_recent_que: "plus récent que (jours)", avant: "avant le", apres: "après le",
+  vide: "est vide", non_vide: "n'est pas vide", coche: "est coché", non_coche: "n'est pas coché",
+  a_le_label: "a le label", n_a_pas_le_label: "n'a pas le label",
+};
+const MODES = { simulation: ["Simulation", "fr-badge--info"], auto: ["Automatique", "fr-badge--success"], desactivee: ["Désactivée", ""] };
+
+async function chargerRegles() {
+  const [schema, liste] = await Promise.all([api("GET", `${base()}/regles/schema`), api("GET", `${base()}/regles`)]);
+  S.R.schema = schema;
+  S.R.regles = liste.regles;
+}
+
+const champDe = (ref) => (S.R.schema ? S.R.schema.champs.find((c) => c.ref === ref) : null);
+function libelleChamp(c) {
+  if (!c) return "?";
+  const col = c.ref.includes(".") ? c.ref.split(".")[1] : c.ref;
+  return c.libelle && c.libelle !== col ? c.libelle : libelleColonne(col);
+}
+const opsDe = (ref) => { const c = champDe(ref); return c ? S.R.schema.operateurs[c.famille] : []; };
+const sansValeur = (op) => S.R.schema && S.R.schema.sans_valeur.includes(op);
+const nomLabel = (id) => (S.catalogue.find((l) => l.id === id) || { nom: id }).nom;
+
+function conditionVide() {
+  const premier = S.R.schema.champs.find((c) => c.ref === "d.state") || S.R.schema.champs[0];
+  return { champ: premier.ref, operateur: opsDe(premier.ref)[0], valeur: "" };
+}
+
+function nouvelleRegle() {
+  S.R.edition = { id: null, def: { nom: "", action: "ajouter", label_id: S.catalogue[0] ? S.catalogue[0].id : "",
+    mode: "simulation", verrou: true, groupes: [[conditionVide()]] } };
+  S.R.simulation = null;
+  S.R.erreur = null;
+  rendu();
+}
+
+function modifierRegle(r) {
+  S.R.edition = { id: r.id, def: JSON.parse(JSON.stringify(r.definition)) };
+  S.R.simulation = null;
+  S.R.erreur = null;
+  rendu();
+}
+
+function resumeConditions(def) {
+  return def.groupes.map((g) => g.map((c) => {
+    const nom = libelleChamp(champDe(c.champ));
+    if (sansValeur(c.operateur)) return `${nom} ${LIB_OPS[c.operateur]}`;
+    if (c.operateur === "plus_ancien_que") return `${nom} plus ancien que ${c.valeur} jours`;
+    if (c.operateur === "plus_recent_que") return `${nom} plus récent que ${c.valeur} jours`;
+    let v = c.valeur;
+    if (c.champ === "labels") v = nomLabel(c.valeur);
+    else if (c.champ === "d.state" && ETATS[v]) v = ETATS[v][0];
+    else if (c.operateur === "avant" || c.operateur === "apres") v = new Date(`${v}T00:00:00`).toLocaleDateString("fr-FR");
+    return `${nom} ${LIB_OPS[c.operateur] || c.operateur} « ${v} »`;
+  }).join(" ET ")).join(" — OU — ");
+}
+
+function definitionPropre(def) {
+  return { ...def, nom: def.nom.trim(),
+    groupes: def.groupes.map((g) => g.map((c) => ({ champ: c.champ, operateur: c.operateur, valeur: sansValeur(c.operateur) ? null : c.valeur }))) };
+}
+
+async function simulerEdition() {
+  const e = S.R.edition;
+  const q = e.id ? `?regle_id=${e.id}` : "";
+  S.R.erreur = null;
+  try {
+    S.R.simulation = await api("POST", `${base()}/regles/simuler${q}`, definitionPropre(e.def));
+  } catch (err) {
+    S.R.simulation = null;
+    S.R.erreur = err.message;
+  }
+}
+
+async function enregistrerRegle() {
+  const e = S.R.edition;
+  S.R.erreur = null;
+  try {
+    if (e.id) await api("PUT", `${base()}/regles/${e.id}`, definitionPropre(e.def));
+    else await api("POST", `${base()}/regles`, definitionPropre(e.def));
+  } catch (err) {
+    S.R.erreur = err.message;
+    return;
+  }
+  S.message = { type: "success", titre: "Règle enregistrée", texte: `« ${e.def.nom.trim()} »` };
+  S.R.edition = null;
+  S.R.simulation = null;
+  await chargerRegles();
+}
+
+function champValeur(c, idx) {
+  const ch = champDe(c.champ);
+  if (!ch || sansValeur(c.operateur)) return h("div", { class: "lbl-cond__valeur" });
+  const id = `val-${idx}`;
+  const maj = (e) => { c.valeur = e.target.value; S.R.simulation = null; };
+  let champ;
+  if (c.champ === "d.state" && (c.operateur === "egal" || c.operateur === "different")) {
+    if (!c.valeur) c.valeur = "en_construction";
+    champ = h("select", { class: "fr-select", id, onchange: (e) => { maj(e); rendu(); } },
+      Object.entries(ETATS).map(([v, [lib]]) => h("option", { value: v, selected: v === c.valeur, text: lib })));
+  } else if (ch.famille === "labels") {
+    if (!c.valeur && S.catalogue[0]) c.valeur = S.catalogue[0].id;
+    champ = h("select", { class: "fr-select", id, onchange: (e) => { maj(e); rendu(); } },
+      S.catalogue.map((l) => h("option", { value: l.id, selected: l.id === c.valeur, text: l.nom })));
+  } else if (c.operateur === "avant" || c.operateur === "apres") {
+    champ = h("input", { class: "fr-input", type: "date", id, value: c.valeur || "", oninput: maj });
+  } else if (ch.famille === "nombre" || c.operateur === "plus_ancien_que" || c.operateur === "plus_recent_que") {
+    champ = h("input", { class: "fr-input", type: "number", id, value: c.valeur ?? "", min: ch.famille === "date" ? "0" : null, oninput: maj });
+  } else {
+    champ = h("input", { class: "fr-input", type: "text", id, value: c.valeur ?? "", maxlength: "500", oninput: maj });
+  }
+  return h("div", { class: "fr-input-group lbl-cond__valeur" }, h("label", { class: "fr-label lbl-cache", for: id, text: "Valeur" }), champ);
+}
+
+function ligneCondition(groupe, c, gi, ci) {
+  const sources = [...new Set(S.R.schema.champs.map((x) => x.source))];
+  const idC = `cond-${gi}-${ci}`;
+  const idO = `op-${gi}-${ci}`;
+  return h("div", { class: "lbl-cond" },
+    h("div", { class: "fr-select-group lbl-cond__champ" },
+      h("label", { class: "fr-label lbl-cache", for: idC, text: "Colonne" }),
+      h("select", { class: "fr-select", id: idC, onchange: (e) => {
+        c.champ = e.target.value; c.operateur = opsDe(c.champ)[0]; c.valeur = ""; S.R.simulation = null; rendu();
+      } }, sources.map((src) => h("optgroup", { label: src },
+        S.R.schema.champs.filter((x) => x.source === src).map((x) => h("option", { value: x.ref, selected: x.ref === c.champ, text: libelleChamp(x) })))))),
+    h("div", { class: "fr-select-group lbl-cond__op" },
+      h("label", { class: "fr-label lbl-cache", for: idO, text: "Condition" }),
+      h("select", { class: "fr-select", id: idO, onchange: (e) => { c.operateur = e.target.value; c.valeur = ""; S.R.simulation = null; rendu(); } },
+        opsDe(c.champ).map((o) => h("option", { value: o, selected: o === c.operateur, text: LIB_OPS[o] || o })))),
+    champValeur(c, `${gi}-${ci}`),
+    h("button", { type: "button", class: "fr-btn fr-btn--tertiary fr-btn--sm lbl-btn-icone", id: `suppr-${gi}-${ci}`,
+      title: "Supprimer la condition", "aria-label": "Supprimer la condition",
+      onclick: () => {
+        groupe.splice(ci, 1);
+        if (!groupe.length) S.R.edition.def.groupes.splice(gi, 1);
+        if (!S.R.edition.def.groupes.length) S.R.edition.def.groupes.push([conditionVide()]);
+        S.R.simulation = null; rendu();
+      } }, icone("fermer")));
+}
+
+function editeurRegle() {
+  const e = S.R.edition;
+  const def = e.def;
+  const sim = S.R.simulation;
+  const autoOk = S.R.schema.auto_autorise;
+  const radio = (val, texte, aide, disabled) => {
+    const id = `mode-${val}`;
+    return h("div", { class: "fr-fieldset__element" }, h("div", { class: "fr-radio-group" },
+      h("input", { type: "radio", id, name: "lbl-mode", value: val, checked: def.mode === val, disabled,
+        onchange: () => { def.mode = val; rendu(); } }),
+      h("label", { class: "fr-label", for: id }, texte, h("span", { class: "fr-hint-text", text: aide }))));
+  };
+  return h("section", { class: "lbl-carte", "aria-labelledby": "lbl-titre-edition" },
+    h("h2", { class: "fr-h5 fr-mb-0", id: "lbl-titre-edition", text: e.id ? `Modifier « ${def.nom} »` : "Nouvelle règle" }),
+    h("div", { class: "lbl-regle-entete" },
+      h("div", { class: "fr-input-group" },
+        h("label", { class: "fr-label", for: "regle-nom", text: "Nom de la règle" }),
+        h("input", { class: "fr-input", id: "regle-nom", value: def.nom, maxlength: "120", oninput: (ev) => { def.nom = ev.target.value; } })),
+      selectChamp("Action", [{ value: "ajouter", label: "Ajouter le label" }, { value: "retirer", label: "Retirer le label" }],
+        def.action, (v) => { def.action = v; S.R.simulation = null; rendu(); }),
+      selectChamp("Label", S.catalogue.map((l) => ({ value: l.id, label: l.nom })), def.label_id,
+        (v) => { def.label_id = v; S.R.simulation = null; rendu(); })),
+    h("div", { class: "lbl-pile" },
+      h("h3", { class: "fr-text--md fr-text--bold fr-mb-0", text: "Quand" }),
+      def.groupes.map((g, gi) => [
+        gi > 0 ? h("div", { class: "lbl-ou", "aria-hidden": "true" }, h("span", { text: "OU" })) : null,
+        h("div", { class: "lbl-groupe", role: "group", "aria-label": `Groupe ${gi + 1}` },
+          h("p", { class: "lbl-groupe__titre", text: `Groupe ${gi + 1} — toutes ces conditions (ET)` }),
+          g.map((c, ci) => ligneCondition(g, c, gi, ci)),
+          h("button", { type: "button", class: "fr-btn fr-btn--tertiary-no-outline fr-btn--sm lbl-btn", id: `ajout-et-${gi}`,
+            onclick: () => { g.push(conditionVide()); S.R.simulation = null; rendu(); } }, icone("plus"), "Ajouter une condition (ET)")),
+      ]),
+      h("div", {}, h("button", { type: "button", class: "fr-btn fr-btn--secondary fr-btn--sm lbl-btn", id: "ajout-ou",
+        disabled: def.groupes.length >= 10,
+        onclick: () => { def.groupes.push([conditionVide()]); S.R.simulation = null; rendu(); } }, icone("plus"), "Ajouter un groupe (OU)"))),
+    h("fieldset", { class: "fr-fieldset fr-mb-0" },
+      h("legend", { class: "fr-fieldset__legend fr-text--regular", text: "Mode" }),
+      radio("simulation", "Simulation", "Calcule seulement les dossiers concernés ; vous appliquez à la main.", false),
+      radio("auto", "Automatique", autoOk ? "Appliquée à chaque synchronisation planifiée, sans intervention."
+        : "Désactivé par la configuration du serveur.", !autoOk),
+      radio("desactivee", "Désactivée", "Conservée mais jamais exécutée.", false)),
+    h("div", { class: "fr-checkbox-group" },
+      h("input", { type: "checkbox", id: "regle-verrou", checked: def.verrou, onchange: (ev) => { def.verrou = ev.target.checked; } }),
+      h("label", { class: "fr-label", for: "regle-verrou" }, "Ne pas refaire ce qu'une personne a défait",
+        h("span", { class: "fr-hint-text", text: "Si quelqu'un retire (ou remet) le label à la main, la règle ne revient plus sur ce dossier." }))),
+    S.R.erreur ? alerte("error", "Règle invalide", S.R.erreur) : null,
+    sim ? alerte("info", `Simulation : ${pluriel(sim.correspondants, "dossier remplit", "dossiers remplissent")} les conditions`,
+      `${sim.a_faire} à ${def.action === "ajouter" ? "étiqueter" : "désétiqueter"} · ${sim.deja} déjà dans l'état voulu`
+      + (sim.verrouilles ? ` · ${sim.verrouilles} laissé(s) de côté (modifiés à la main)` : "")
+      + (sim.numeros_a_faire.length ? ` — ex. : ${sim.numeros_a_faire.slice(0, 8).join(", ")}${sim.a_faire > 8 ? "…" : ""}` : "")) : null,
+    h("div", { class: "lbl-actions lbl-actions--droite" },
+      bouton("Annuler", () => { S.R.edition = null; S.R.simulation = null; S.R.erreur = null; rendu(); }, { type: "secondary" }),
+      bouton("Simuler", () => action(simulerEdition), { type: "tertiary", ic: "verifier" }),
+      bouton("Enregistrer", () => {
+        if (!def.nom.trim()) { S.R.erreur = "Donnez un nom à la règle."; rendu(); return; }
+        action(enregistrerRegle);
+      })));
+}
+
+function listeRegles() {
+  const R = S.R;
+  if (!R.regles.length) {
+    return h("div", { class: "lbl-carte" }, h("p", { class: "lbl-mention", text: "Aucune règle pour cette démarche. Créez-en une pour poser ou retirer un label automatiquement selon des conditions." }));
+  }
+  const tableau = h("div", { class: "fr-table fr-table--bordered fr-table--multiline fr-mb-0 lbl-tableau" },
+    h("div", { class: "fr-table__wrapper" }, h("div", { class: "fr-table__container" }, h("div", { class: "fr-table__content" },
+      h("table", {},
+        h("caption", { class: "lbl-cache", text: "Règles de la démarche" }),
+        h("thead", {}, h("tr", {}, ["Règle", "Conditions", "Mode", "Dernière exécution", "Actions"].map((t) => h("th", { scope: "col", text: t })))),
+        h("tbody", {}, R.regles.map((r) => {
+          if (!r.definition) return h("tr", {}, h("td", { colspan: "5" }, alerte("error", null, r.erreur)));
+          const d = r.definition;
+          const lab = S.catalogue.find((l) => l.id === d.label_id);
+          return h("tr", {},
+            h("td", {}, h("strong", { text: d.nom }), h("div", { class: "lbl-ligne lbl-ligne--centre" },
+              h("span", { class: "lbl-mention", text: d.action === "ajouter" ? "Ajouter" : "Retirer" }),
+              h("span", { class: `fr-tag fr-tag--sm ${lab ? classeCouleur(lab.couleur) : ""}`, text: lab ? lab.nom : r.label || "?" }))),
+            h("td", { class: "lbl-resume", text: resumeConditions(d) }),
+            h("td", {}, badge(...MODES[d.mode])),
+            h("td", {}, r.derniere_execution ? [h("div", { text: dateEpoch(r.derniere_execution) }),
+              h("div", { class: "lbl-mention", text: r.dernier_resultat || "" })] : h("span", { class: "lbl-mention", text: "jamais" })),
+            h("td", {}, h("div", { class: "lbl-actions-ligne" },
+              bouton("Modifier", () => modifierRegle(r), { type: "tertiary", taille: "sm" }),
+              bouton("Appliquer maintenant", () => action(async () => {
+                const sim = await api("POST", `${base()}/regles/simuler?regle_id=${r.id}`, d);
+                S.modal = { type: "regle", regle: r, sim };
+              }), { type: "secondary", taille: "sm", disabled: d.mode === "desactivee" }),
+              h("button", { type: "button", class: "fr-btn fr-btn--tertiary-no-outline fr-btn--sm lbl-btn-icone",
+                title: `Supprimer la règle ${d.nom}`, "aria-label": `Supprimer la règle ${d.nom}`, disabled: S.occupe,
+                onclick: () => { S.modal = { type: "suppr-regle", regle: r }; rendu(); } }, icone("corbeille")))));
+        })))))));
+  return tableau;
+}
+
 function vueRegles() {
-  return alerte("info", "Bientôt disponible", "Les règles automatiques ET / OU arrivent dans la prochaine version (phase 5).");
+  if (!S.R.schema) return h("p", { class: "lbl-mention", text: "Chargement des règles…" });
+  return [
+    h("div", { class: "lbl-entre lbl-entre--centre" },
+      h("h2", { class: "fr-h4 fr-mb-0", text: pluriel(S.R.regles.length, "règle", "règles") }),
+      S.R.edition ? null : bouton("Nouvelle règle", nouvelleRegle, { taille: "sm", ic: "plus" })),
+    h("p", { class: "lbl-mention", text: "Une règle pose ou retire un label sur les dossiers qui remplissent au moins un groupe de conditions. "
+      + "Les conditions portent sur les colonnes synchronisées par OTP (dossier, champs du formulaire, annotations privées) et sur les labels." }),
+    S.R.edition ? editeurRegle() : null,
+    listeRegles(),
+  ];
 }
 
 // ------------------------------------------------------------------ rendu

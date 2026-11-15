@@ -64,6 +64,22 @@ couvrir plusieurs) ; aucun appel DN pour un dossier déjà dans l'état voulu ; 
 
 Le DSFR (CSS, police Marianne, icônes utiles) est auto-hébergé dans `app/static/dsfr/` (version dans `VERSION`).
 
+## Règles automatiques (phase 5)
+
+Onglet **Règles** du widget : « ajouter / retirer tel label quand… », avec des **groupes OU de conditions ET**
+portant sur les colonnes OTP (dossier, champs du formulaire, annotations privées) et sur les labels.
+
+- Opérateurs selon le type : dates (plus ancien / récent que N jours, avant / après le…), texte, nombres,
+  cases à cocher, labels (a / n'a pas le label), vide / non vide.
+- **Simulation** : aperçu des dossiers concernés, sans écriture. **Appliquer maintenant** : 500 dossiers au plus par passage.
+- **Automatique** : exécutée par la tâche planifiée (`POST /api/taches/synchro`) après chaque synchro.
+  Désactivable pour tout le serveur avec `regles_auto_autorisees: false`.
+- **Verrou** (activé par défaut) : un dossier déjà traité par la règle puis modifié à la main n'est plus touché
+  (mémoire dans `LBL_Regles_Traces`).
+- Règles stockées dans `LBL_Regles` (conditions en JSON, revalidées par le serveur à chaque usage).
+- Sécurité : champs vérifiés contre le schéma réel du document, opérateurs en liste fermée, valeurs en paramètres SQL.
+- Conseil : dans Grist, **règles d'accès** sur `LBL_Regles` pour réserver la modification aux propriétaires du document.
+
 ## Qualité et sécurité
 
 ```powershell
