@@ -116,8 +116,8 @@ def create_app(
         h["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
         h["Cross-Origin-Opener-Policy"] = "same-origin"
-        if not widget:
-            h["Cache-Control"] = "no-store"
+        # Widget : revalidation à chaque chargement (sinon une mise à jour peut rester invisible dans Grist)
+        h["Cache-Control"] = "no-cache" if widget else "no-store"
         return response
 
     @app.exception_handler(DNError)

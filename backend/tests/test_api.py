@@ -36,6 +36,7 @@ def test_widget_csp(api):
     csp = r.headers["content-security-policy"]
     assert "frame-ancestors https://grist.numerique.gouv.fr" in csp
     assert "'unsafe-inline'" not in csp
+    assert r.headers["cache-control"] == "no-cache"
 
 
 def test_docs_desactivees(api):
