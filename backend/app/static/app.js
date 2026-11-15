@@ -309,7 +309,7 @@ function etatDesLieux(lignes) {
       h("div", { class: "lbl-stat lbl-stat--fort" }, h("strong", { text: String(lignes.length) }), h("span", { text: "dossiers" })),
       h("div", { class: "lbl-stat" }, h("strong", { text: String(lignes.length - sans) }), h("span", { text: "avec au moins un label" })),
       h("div", { class: "lbl-stat" }, h("strong", { text: String(sans) }), h("span", { text: "sans label" }))),
-    h("div", { class: "lbl-tags", role: "group", "aria-label": "Filtrer par label" },
+    h("div", { class: "lbl-tags lbl-filtres", role: "group", "aria-label": "Filtrer par label" },
       items.map((it) => h("button", {
         type: "button", class: `fr-tag ${classeCouleur(it.couleur)}`, "aria-pressed": actif === it.id ? "true" : "false",
         onclick: filtre(it.id),
@@ -338,6 +338,20 @@ function configColonnes() {
             h("label", { class: "fr-label", for: id, text: libelleColonne(c) })));
         }))
       : h("p", { class: "lbl-mention", text: "Aucune autre colonne transmise au widget." }));
+}
+
+function filtreActif() {
+  const f = S.tableau.filtreLabel;
+  if (!f) return null;
+  const lab = S.catalogue.find((l) => l.id === f);
+  const nom = f === "__sans" ? "Sans label" : lab ? lab.nom : "Label hors catalogue";
+  return h("div", { class: "lbl-ligne lbl-filtre-actif" },
+    h("span", { class: "lbl-mention", text: "Filtre :" }),
+    h("button", {
+      type: "button", class: `fr-tag fr-tag--sm fr-tag--dismiss ${lab ? classeCouleur(lab.couleur) : ""}`,
+      "aria-label": `Retirer le filtre ${nom}`,
+      onclick: () => { S.tableau.filtreLabel = null; S.tableau.page = 1; rendu(); },
+    }, nom));
 }
 
 function vueTableau() {
@@ -402,7 +416,8 @@ function vueTableau() {
             oninput: (e) => { T.recherche = e.target.value.replace(/\D/g, ""); T.page = 1; rendu(); } })),
         bouton(T.config ? "Masquer la configuration" : "Configurer les colonnes", () => { T.config = !T.config; rendu(); },
           { type: "secondary" })),
-      h("p", { class: "lbl-mention", text: `${lignes.length} dossier(s)${T.filtreLabel ? " (filtrés par label)" : ""} — cliquez sur un numéro pour l'ouvrir.` }),
+      filtreActif(),
+      h("p", { class: "lbl-mention", text: `${lignes.length} dossier(s) — cliquez sur un numéro pour l'ouvrir.` }),
       lignes.length ? tableau : h("p", { class: "lbl-mention", text: "Aucun dossier ne correspond." }),
       pagination),
   ];

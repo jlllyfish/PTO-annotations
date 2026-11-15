@@ -71,7 +71,14 @@ body { margin: 0; background: var(--background-alt-grey, #f6f6f6); }
 .lbl-tags .fr-tag { margin: 0; }
 
 /* Onglet Tableau */
-.lbl-tags .fr-tag[aria-pressed="true"] { outline: 2px solid var(--border-active-blue-france, #000091); outline-offset: 2px; }
+/* Pastilles-filtres : pas de coche DSFR ; l'état actif est un anneau bleu France (aria-pressed reste lu). */
+.lbl-filtres button.fr-tag[aria-pressed]::after { content: none; display: none; }
+.lbl-filtres button.fr-tag[aria-pressed="true"]:not(:disabled) { background-image: none;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--border-active-blue-france, #000091); font-weight: 700; }
+.lbl-filtres button.fr-tag:not([class*="lbl-c--"])[aria-pressed="true"]:not(:disabled) {
+  background-color: var(--background-action-low-blue-france); color: var(--text-action-high-blue-france); }
+.lbl-filtre-actif { align-items: center; gap: 0.5rem; }
+.lbl-filtre-actif .fr-tag { margin: 0; }
 .lbl-tri { margin: 0; font-weight: 700; }
 .lbl-lien { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: var(--text-action-high-blue-france, #000091);
   text-decoration: underline; }
@@ -117,7 +124,7 @@ button.fr-tag.lbl-c--yellow-moutarde:hover { background-color: var(--background-
 .fr-tag.lbl-c--yellow-tournesol, .lbl-pastille.lbl-c--yellow-tournesol { background-color: var(--background-action-low-yellow-tournesol); color: var(--text-action-high-yellow-tournesol); }
 button.fr-tag.lbl-c--yellow-tournesol:hover { background-color: var(--background-action-low-yellow-tournesol-hover); }
 .fr-tag--dismiss[class*="lbl-c--"]::after { color: inherit; }
-/* Filtre actif : on garde la couleur du label (le DSFR la remplace par du bleu) ; la coche reste visible. */
+/* Filtre actif : on garde la couleur du label (le DSFR la remplace par du bleu). */
 button.fr-tag.lbl-c--beige-gris-galet[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-beige-gris-galet); color: var(--text-action-high-beige-gris-galet); }
 button.fr-tag.lbl-c--blue-cumulus[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-blue-cumulus); color: var(--text-action-high-blue-cumulus); }
 button.fr-tag.lbl-c--blue-ecume[aria-pressed=true]:not(:disabled) { background-image: none; background-color: var(--background-action-low-blue-ecume); color: var(--text-action-high-blue-ecume); }
