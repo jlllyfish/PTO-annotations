@@ -12,6 +12,9 @@ TOKEN = "tok_" + "a" * 40
 
 @pytest.fixture(autouse=True)
 def secrets(monkeypatch):
+    # Isoler les tests des variables chargées depuis .env dans la session (hôtes autorisés, mode debug…)
+    for var in ("LBL_ALLOWED_HOSTS", "LBL_DEBUG", "LBL_CONFIG"):
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("DN_TOKEN_TEST", "dn-secret")
     monkeypatch.setenv("GRIST_SERVICE_KEY", "grist-secret")
 
