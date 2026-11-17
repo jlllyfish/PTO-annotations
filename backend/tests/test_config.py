@@ -51,3 +51,14 @@ def test_secret_par_fichier(tmp_path, monkeypatch):
 def test_config_invalide(tmp_path, bad):
     with pytest.raises(ConfigError):
         load_config(write(tmp_path, bad))
+
+
+def test_document_par_id_court_ou_complet():
+    from app.config import AppConfig
+    long_, court = "jD9RabcdefFdXXXXXXXXtz", "jD9RabcdefFd"
+    base = {"demarches": [{"numero": 1, "nom": "D", "dn_token": "DN_TOKEN_TEST"}], "nom": "N"}
+    c_long = AppConfig.model_validate({"documents": [{**base, "grist_doc_id": long_}]})
+    c_court = AppConfig.model_validate({"documents": [{**base, "grist_doc_id": court}]})
+    assert c_long.document(court) and c_long.document(long_)
+    assert c_court.document(long_) and c_court.document(court)
+    assert c_long.document("jD9RabcdefFe") is None and c_long.document("jD9RabcdefFdYYYYYYYYtz") is None

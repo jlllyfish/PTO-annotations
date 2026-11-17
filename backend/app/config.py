@@ -103,7 +103,13 @@ class AppConfig(_Strict):
         return self
 
     def document(self, doc_id: str) -> DocumentConfig | None:
-        return next((d for d in self.documents if d.grist_doc_id == doc_id), None)
+        """Accepte l'ID complet (22 car., Paramètres du document) comme l'ID court de l'adresse (ses 12 premiers)."""
+        exact = next((d for d in self.documents if d.grist_doc_id == doc_id), None)
+        if exact or len(doc_id) < 12:
+            return exact
+        return next((d for d in self.documents
+                     if min(len(d.grist_doc_id), len(doc_id)) == 12
+                     and d.grist_doc_id[:12] == doc_id[:12]), None)
 
     def secrets_requis(self) -> set[str]:
         noms = {self.grist_service_key} | {d.dn_token for doc in self.documents for d in doc.demarches}

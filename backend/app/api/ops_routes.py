@@ -18,7 +18,7 @@ from ..ops.service import (
     vidange_automatique,
     vider_journal,
 )
-from .routes import Qui, client_dn, demarche_de, exiger_action, exiger_proprietaire
+from .routes import Qui, client_dn, demarche_de, exiger_action, exiger_proprietaire, grist_de
 
 router = APIRouter()
 
@@ -59,7 +59,7 @@ async def route_operations(request: Request, qui: Qui, numero: Num, demande: Dem
     dn = client_dn(request, d)
     doc = qui.document.grist_doc_id
     try:
-        async with qui.grist(request.app.state.grist_transport) as grist:
+        async with grist_de(request, qui) as grist:
             if demande.envoyer:
                 bilan = await executer(dn, grist, d, demande.action, demande.label_id, demande.numeros,
                                        source="manuel", cle_schema=doc, perimetre=droits.perimetre, auteur=auteur)
@@ -78,7 +78,7 @@ async def route_operations(request: Request, qui: Qui, numero: Num, demande: Dem
 async def route_envoyer_file(request: Request, qui: Qui, numero: Num) -> dict:
     d = demarche_de(qui, numero)
     droits = await exiger_action(request, qui, d)
-    async with qui.grist(request.app.state.grist_transport) as grist:
+    async with grist_de(request, qui) as grist:
         doc = qui.document.grist_doc_id
         bilans = await envoyer_file(client_dn(request, d), grist, d, cle_schema=doc,
                                     perimetre=droits.perimetre, auteur=droits.identite.email)
@@ -90,6 +90,6 @@ async def route_envoyer_file(request: Request, qui: Qui, numero: Num) -> dict:
 async def route_vider_journal(request: Request, qui: Qui, numero: Num) -> dict:
     d = demarche_de(qui, numero)
     await exiger_proprietaire(request, qui, d)
-    async with qui.grist(request.app.state.grist_transport) as grist:
+    async with grist_de(request, qui) as grist:
         n = await vider_journal(grist, d, cle_schema=qui.document.grist_doc_id)
     return {"supprimees": n}

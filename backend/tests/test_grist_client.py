@@ -64,3 +64,21 @@ async def test_supprimer_par_lots():
     assert [len(b[0][2]) for b in rec.bodies()] == [500, 500, 100]
     with pytest.raises(ValueError):
         await GristClient.par_jeton(BASE, TOKEN).supprimer('x"; --', [1])
+
+
+@pytest.mark.anyio
+async def test_sql_par_le_lecteur_de_service():
+    import httpx
+
+    from app.grist.client import GristClient
+    vus = []
+
+    def h(req):
+        vus.append((req.url.host, req.headers.get("authorization"), req.url.params.get("auth")))
+        return httpx.Response(200, json={"records": [{"fields": {"n": 1}}]})
+    t = httpx.MockTransport(h)
+    u = GristClient.par_jeton("https://grist.numerique.gouv.fr/o/x/api/docs/AbCdEfGh1234", "tok", transport=t)
+    u.lecteur = GristClient.par_cle("grist.numerique.gouv.fr", "AbCdEfGh1234", "cle", transport=t)
+    async with u:
+        assert await u.sql("SELECT 1") == [{"n": 1}]
+    assert vus == [("grist.numerique.gouv.fr", "Bearer cle", None)]

@@ -14,7 +14,7 @@ from ..ops.service import vidange_automatique
 from ..regles.service import appliquer_regles_auto
 from ..sync.jobs import DejaEnCours
 from ..sync.service import Mode, Progression, lire_etat, synchroniser
-from .routes import Qui, client_dn, demarche_de
+from .routes import Qui, client_dn, demarche_de, grist_de
 
 router = APIRouter()
 
@@ -40,7 +40,7 @@ async def lancer_synchro(request: Request, qui: Qui, numero: Annotated[int, Path
     doc_id = qui.document.grist_doc_id
 
     async def travail(prog: Progression):
-        async with qui.grist(app.grist_transport) as grist:
+        async with grist_de(request, qui) as grist:
             return await synchroniser(dn, grist, d, demande.mode, cle_schema=doc_id,
                                       numeros=demande.numeros, progression=prog)
 
@@ -55,7 +55,7 @@ async def lancer_synchro(request: Request, qui: Qui, numero: Annotated[int, Path
 async def etat_synchro(request: Request, qui: Qui, numero: Annotated[int, Path(gt=0)]) -> dict:
     d = demarche_de(qui, numero)
     tache = request.app.state.taches.etat(qui.document.grist_doc_id, numero)
-    async with qui.grist(request.app.state.grist_transport) as grist:
+    async with grist_de(request, qui) as grist:
         tables = await grist.tables()
         derniere = await lire_etat(grist, d.numero) if "LBL_Etat" in tables else None
     return {"tache": tache.vue() if tache else None, "derniere": derniere}

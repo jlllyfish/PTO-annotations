@@ -83,8 +83,15 @@ class GristClient:
         """`base_url` doit avoir été validée (voir security.verifier_base_url)."""
         return cls(base_url, headers={}, params={"auth": token}, **kw)
 
+    # Client « clé de service » pour les lectures SQL : l'endpoint /sql de Grist exige de pouvoir lire
+    # tout le document, ce que les règles d'accès refusent aux non-propriétaires. Les écritures, elles,
+    # restent faites avec le jeton de l'utilisateur (ses droits Grist s'appliquent).
+    lecteur: GristClient | None = None
+
     async def aclose(self) -> None:
         await self._http.aclose()
+        if self.lecteur is not None:
+            await self.lecteur.aclose()
 
     async def __aenter__(self) -> GristClient:
         return self
@@ -122,6 +129,8 @@ class GristClient:
         ]
 
     async def sql(self, sql: str, args: Sequence[Any] = ()) -> list[dict[str, Any]]:
+        if self.lecteur is not None:
+            return await self.lecteur.sql(sql, args)
         body = await self._req("POST", "/sql", json={"sql": sql, "args": list(args), "timeout": 5000})
         return [r["fields"] for r in body.get("records", [])]
 

@@ -6,9 +6,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Request
 
-from ..config import DemarcheConfig
+from ..config import DemarcheConfig, read_secret
 from ..dn.client import DNClient
 from ..droits import Droits, calculer
+from ..grist.client import GristClient
 from ..identite import IdentiteDouteuse
 from ..security import Appelant, AuthError
 
@@ -38,6 +39,15 @@ def demarche_de(qui: Appelant, numero: int) -> DemarcheConfig:
     if d is None:
         raise HTTPException(404, "Démarche non configurée pour ce document")
     return d
+
+
+def grist_de(request: Request, qui: Appelant) -> GristClient:
+    """Client Grist de l'utilisateur (écritures sous ses droits) ; lectures SQL par la clé de service."""
+    state = request.app.state
+    client = qui.grist(state.grist_transport)
+    client.lecteur = GristClient.par_cle(state.config.grist_host, qui.document.grist_doc_id,
+                                         read_secret(state.config.grist_service_key), transport=state.grist_transport)
+    return client
 
 
 def client_dn(request: Request, demarche: DemarcheConfig) -> DNClient:
