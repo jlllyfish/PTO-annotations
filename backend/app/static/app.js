@@ -271,16 +271,29 @@ async function lancerSynchro(mode, numeros) {
 }
 
 function messageBilan(b) {
-  const parts = [];
-  if (b.appliques) parts.push(`${b.appliques} appliqué(s)`);
-  if (b.deja) parts.push(`${b.deja} déjà dans l'état voulu`);
-  if (b.en_file) parts.push(`${b.en_file} mis en file`);
-  if (b.introuvables) parts.push(`${b.introuvables} introuvable(s)`);
-  if (b.hors_perimetre) parts.push(`${b.hors_perimetre} hors de vos groupes instructeurs`);
-  if (b.erreurs) parts.push(`${b.erreurs} erreur(s)`);
   const verbe = b.action === "ajouter" ? "Ajout" : "Retrait";
-  return { type: b.erreurs || b.introuvables || b.hors_perimetre ? "warning" : "success",
-    titre: `${verbe} de « ${b.label.nom} »`, texte: parts.join(" · ") || "Aucun changement." };
+  const nom = `« ${b.label.nom} »`;
+  const hors = (b.details || []).filter((d) => d.statut === "refuse").map((d) => d.numero);
+  const phrases = [];
+  const ok = [];
+  if (b.appliques) ok.push(pluriel(b.appliques, "dossier modifié", "dossiers modifiés"));
+  if (b.deja) ok.push(`${pluriel(b.deja, "dossier", "dossiers")} déjà dans l'état voulu`);
+  if (b.en_file) ok.push(`${pluriel(b.en_file, "opération mise", "opérations mises")} en file d'attente`);
+  if (ok.length) phrases.push(`${ok.join(", ")}.`);
+  if (b.hors_perimetre) {
+    const nums = hors.length ? ` (n° ${hors.slice(0, 10).join(", ")}${hors.length > 10 ? "…" : ""})` : "";
+    phrases.push(b.hors_perimetre === 1
+      ? `Le dossier${hors.length ? ` n° ${hors[0]}` : ""} n'a pas été modifié : il appartient à un groupe instructeur dont vous ne faites pas partie dans Démarche Numérique.`
+      : `${b.hors_perimetre} dossiers${nums} n'ont pas été modifiés : ils appartiennent à des groupes instructeurs dont vous ne faites pas partie dans Démarche Numérique.`);
+  }
+  if (b.introuvables) phrases.push(`${pluriel(b.introuvables, "dossier introuvable", "dossiers introuvables")} dans cette démarche.`);
+  if (b.erreurs) phrases.push(`${pluriel(b.erreurs, "erreur", "erreurs")} : voir l'onglet File et journal.`);
+  const rien = !b.appliques && !b.deja && !b.en_file;
+  return {
+    type: b.erreurs || b.introuvables || b.hors_perimetre ? (rien ? "error" : "warning") : "success",
+    titre: rien && (b.hors_perimetre || b.erreurs || b.introuvables) ? `${verbe} de ${nom} non effectué` : `${verbe} de ${nom}`,
+    texte: phrases.join(" ") || "Aucun changement.",
+  };
 }
 
 async function operer(sens, labelId, numeros, envoyer = true) {
@@ -1236,5 +1249,7 @@ grist.onOptions((options) => {
   S.T.colonnes = c.filter((x) => typeof x === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,99}$/.test(x));
   rendu();
 });
-grist.onRecords((recs) => { S.records = recs || []; rendu(); });
+// « normal » : toutes les colonnes de la table, même masquées dans le widget (dont groupe_instructeur_number
+// et les colonnes ajoutées après coup) ; par défaut Grist ne transmet que les colonnes affichées.
+grist.onRecords((recs) => { S.records = recs || []; rendu(); }, { includeColumns: "normal" });
 demarrer();
