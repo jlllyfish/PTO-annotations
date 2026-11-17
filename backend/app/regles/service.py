@@ -108,7 +108,7 @@ async def enregistrer(dn: DNClient, grist: GristClient, d: DemarcheConfig, regle
     await assurer_schema(grist, cle_schema)
     champs = await champs_disponibles(grist, d)
     compiler(d, regle, champs, time.time())  # lève RegleInvalide si un champ ou un opérateur ne convient pas
-    label = next((l for l in await dn.catalogue(d.numero) if l.id == regle.label_id), None)
+    label = next((l for l in await dn.catalogue(d.numero, frais=True) if l.id == regle.label_id), None)
     if label is None:
         raise RegleInvalide("Ce label n'existe pas dans la démarche")
     champs_ligne = {

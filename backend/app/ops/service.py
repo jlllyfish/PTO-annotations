@@ -62,6 +62,9 @@ def _apres(labels: frozenset[str], action: Action, label_id: str) -> frozenset[s
 async def _label(dn: DNClient, d: DemarcheConfig, label_id: str) -> tuple[list[Label], Label]:
     catalogue = await dn.catalogue(d.numero)
     label = next((l for l in catalogue if l.id == label_id), None)
+    if label is None:  # label créé depuis la mise en cache ?
+        catalogue = await dn.catalogue(d.numero, frais=True)
+        label = next((l for l in catalogue if l.id == label_id), None)
     if label is None:
         raise LabelInconnu("Ce label n'existe pas dans la démarche")
     return catalogue, label

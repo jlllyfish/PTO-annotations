@@ -135,3 +135,14 @@ async def test_erreur_reseau_lot_ne_bloque_pas():
     dn, _ = client(lambda req: httpx.Response(500), tentatives=1)
     res = await dn.appliquer(Action.AJOUTER, [Operation("D", "L")])
     assert res[0].statut == Statut.ERREUR
+
+
+@pytest.mark.anyio
+async def test_catalogue_en_cache():
+    dn, rec = client(lambda r: httpx.Response(200, json={"data": {"demarche": {"labels": [
+        {"id": "L1", "name": "Urgent", "color": "pink_macaron"}]}}}))
+    await dn.catalogue(1)
+    await dn.catalogue(1)
+    assert len(rec.requests) == 1
+    await dn.catalogue(1, frais=True)
+    assert len(rec.requests) == 2

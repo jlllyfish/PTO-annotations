@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -245,9 +246,18 @@ class DNClient:
 
     # ------------------------------------------------------------------ lecture
 
-    async def catalogue(self, demarche: int) -> list[Label]:
+    CATALOGUE_TTL = 300.0
+
+    async def catalogue(self, demarche: int, *, frais: bool = False) -> list[Label]:
+        """Labels de la démarche, en cache 5 min (`frais=True` : relecture DN, ex. synchro ou label inconnu)."""
+        cache = self.__dict__.setdefault("_cache_catalogue", {})
+        now = time.monotonic()
+        if not frais and (hit := cache.get(demarche)) and hit[0] > now:
+            return hit[1]
         data = await self._data(Q_CATALOGUE, {"n": demarche})
-        return [Label(l["id"], l["name"], l["color"]) for l in data["demarche"]["labels"]]
+        labels = [Label(l["id"], l["name"], l["color"]) for l in data["demarche"]["labels"]]
+        cache[demarche] = (now + self.CATALOGUE_TTL, labels)
+        return labels
 
     async def groupes(self, demarche: int) -> list[GroupeInstructeur]:
         data = await self._data(Q_GROUPES, {"n": demarche})

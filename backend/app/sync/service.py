@@ -156,7 +156,7 @@ async def synchroniser(
 
     try:
         prog.etape = "catalogue"
-        labels = await dn.catalogue(n)
+        labels = await dn.catalogue(n, frais=True)
         await _maj_catalogue(grist, n, labels)
         catalogue = {l.id: l for l in labels}
 

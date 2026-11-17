@@ -125,8 +125,8 @@ const S = {
   ajoutPour: null,        // n° de dossier dont le menu « Ajouter un label » est ouvert
   R: { schema: null, regles: [], edition: null, simulation: null, erreur: null, valeurs: {} },
   T: {
-    page: 1, recherche: "", etat: "", label: "", tri: { col: "__num", sens: "desc" },
-    colonnes: [], brouillon: null, personnaliser: false, selection: new Set(),
+    page: 1, recherche: "", etat: "", label: "", groupe: null, tri: { col: "__num", sens: "desc" },
+    colonnes: [], colonnesDoc: [], colonnesPerso: null, brouillon: null, personnaliser: false, selection: new Set(),
   },
 };
 
@@ -203,13 +203,19 @@ function labelsDuRecord(rec) {
   }
 }
 
+// Affichage dès que le catalogue et l'état de synchro sont là ; droits et journal arrivent ensuite.
 async function chargerDemarche() {
-  const [cat, synchro, droits] = await Promise.all([api("GET", `${base()}/catalogue`), api("GET", `${base()}/synchro`),
-    api("GET", `${base()}/droits`).catch((e) => ({ erreur: e.message }))]);
+  const numero = S.demarche;
+  S.droits = null;
+  S.T.groupe = null;
+  chargerColonnesPerso();
+  const droits = api("GET", `${base()}/droits`).catch((e) => ({ erreur: e.message }));
+  const journal = chargerJournal();
+  const [cat, synchro] = await Promise.all([api("GET", `${base()}/catalogue`), api("GET", `${base()}/synchro`)]);
   S.catalogue = cat.labels;
   S.synchro = synchro;
-  S.droits = droits;
-  await chargerJournal();
+  droits.then((d) => { if (S.demarche === numero) { S.droits = d; rendu(); } });
+  journal.then(() => rendu()).catch(() => {});
 }
 
 // ------------------------------------------------------------------ droits (affichage seulement : le serveur contrôle)
@@ -226,10 +232,18 @@ function horsGroupes(l) {
   return !mesGroupes().has(Number(g));
 }
 const actionnable = (l) => peutAgir() && !horsGroupes(l);
+const COL_GROUPE = "groupe_instructeur_number";
+const groupesConnus = () => S.records.length > 0 && Object.prototype.hasOwnProperty.call(S.records[0], COL_GROUPE);
+// Filtre de groupe effectif : « Mes groupes » par défaut quand on peut le calculer, sinon tous
+function filtreGroupe() {
+  if (S.T.groupe !== null) return S.T.groupe;
+  return S.droits && S.droits.controle_instructeurs && S.droits.groupes && S.droits.groupes.length && groupesConnus()
+    ? "__mes" : "";
+}
 
 function bandeauDroits() {
   const d = S.droits;
-  if (!d) return null;
+  if (!d) return h("div", { class: "lbl-droits", role: "status" }, h("span", { class: "lbl-mention", text: "Vérification de vos droits…" }));
   if (d.erreur) return alerte("error", "Identité non vérifiée", `${d.erreur} — aucune action n'est possible.`);
   const u = d.utilisateur;
   const roles = { owners: "propriétaire", editors: "éditeur", viewers: "lecteur" };
@@ -431,43 +445,98 @@ function fermerPersonnaliser() {
   rendu();
 }
 
+// Configuration des colonnes : personnelle (navigateur) en priorité, sinon celle du document.
+// Seuls les propriétaires enregistrent celle du document : pour un éditeur, Grist ne conserve pas les options
+// du widget et les rétablit à la moindre modification du document (une synchro, par exemple).
+const cleColonnes = () => `pto-labels/colonnes/${S.contexte ? S.contexte.document.id : "?"}/${S.demarche}`;
+const COLONNE_RE = /^[A-Za-z_][A-Za-z0-9_]{0,99}$/;
+const colonnesValides = (c) => (Array.isArray(c) ? c.filter((x) => typeof x === "string" && COLONNE_RE.test(x)) : []);
+
+function appliquerColonnes() {
+  S.T.colonnes = S.T.colonnesPerso || S.T.colonnesDoc;
+}
+
+function chargerColonnesPerso() {
+  try {
+    const v = localStorage.getItem(cleColonnes());
+    S.T.colonnesPerso = v ? colonnesValides(JSON.parse(v)) : null;
+  } catch {
+    S.T.colonnesPerso = null;
+  }
+  appliquerColonnes();
+}
+
 function sauverPersonnaliser() {
   const colonnes = S.T.brouillon || S.T.colonnes;
-  S.T.colonnes = colonnes;
   fermerPersonnaliser();
-  grist.setOptions({ colonnes }).then(() => {
-    S.message = { type: "success", titre: "Tableau enregistré", texte: "Les colonnes et leur ordre sont conservés dans le document Grist." };
-    rendu();
-  }).catch(() => {
-    S.message = { type: "warning", titre: "Configuration non enregistrée", texte: "Elle sera perdue au rechargement." };
-    rendu();
-  });
+  let local = true;
+  try { localStorage.setItem(cleColonnes(), JSON.stringify(colonnes)); } catch { local = false; }
+  S.T.colonnesPerso = colonnes;
+  appliquerColonnes();
+  if (proprietaire()) {
+    grist.setOptions({ colonnes }).then(() => {
+      S.message = { type: "success", titre: "Tableau enregistré",
+        texte: "Pour vous, et comme configuration par défaut du document pour les autres utilisateurs." };
+      rendu();
+    }).catch(() => {
+      S.message = { type: "warning", titre: "Tableau enregistré pour vous seulement", texte: "La configuration du document n'a pas pu être modifiée." };
+      rendu();
+    });
+  } else {
+    S.message = local
+      ? { type: "success", titre: "Tableau enregistré", texte: "Pour vous, dans ce navigateur." }
+      : { type: "warning", titre: "Configuration non enregistrée", texte: "Le navigateur refuse le stockage local : elle sera perdue au rechargement." };
+  }
+  rendu();
+}
+
+function reinitialiserColonnes() {
+  try { localStorage.removeItem(cleColonnes()); } catch { /* rien à faire */ }
+  S.T.colonnesPerso = null;
+  appliquerColonnes();
+  fermerPersonnaliser();
+  S.message = { type: "info", titre: "Tableau réinitialisé", texte: "Configuration du document rétablie." };
+  rendu();
 }
 
 function lignesFiltrees() {
   const T = S.T;
   const toutes = S.records.map((r) => ({ r, num: numeroDe(r), labels: labelsDuRecord(r) })).filter((l) => l.num);
   let lignes = toutes;
+  const fg = filtreGroupe();
+  if (fg === "__mes") { const mes = mesGroupes(); lignes = lignes.filter((l) => mes.has(Number(l.r[COL_GROUPE]))); }
+  else if (fg) lignes = lignes.filter((l) => String(l.r[COL_GROUPE]) === fg);
+  const perimetre = lignes; // base de l'état des lieux : le filtre de groupe s'applique aux compteurs
   if (T.recherche) lignes = lignes.filter((l) => String(l.num).includes(T.recherche));
   if (T.etat) lignes = lignes.filter((l) => l.r.state === T.etat);
   if (T.label === "__sans") lignes = lignes.filter((l) => !l.labels.length);
   else if (T.label) lignes = lignes.filter((l) => l.labels.some((x) => x.id === T.label));
   const cle = T.tri.col === "__num" ? (l) => l.num : T.tri.col === COL_LABELS ? (l) => l.labels.length : (l) => l.r[T.tri.col];
   lignes.sort((a, b) => comparer(cle(a), cle(b)) * (T.tri.sens === "asc" ? 1 : -1));
-  return { toutes, lignes };
+  return { toutes, perimetre, lignes };
 }
 
-function panneauFiltres(toutes) {
+function panneauFiltres(toutes, perimetre) {
   const T = S.T;
   const etats = [...new Set(toutes.map((l) => l.r.state).filter(Boolean))];
   const idRech = nouvelId("rech");
   const compte = new Map();
   let sans = 0;
-  for (const l of toutes) {
+  for (const l of perimetre) {
     if (!l.labels.length) sans++;
     for (const x of l.labels) compte.set(x.id, (compte.get(x.id) || 0) + 1);
   }
   const filtrer = (id) => () => { T.label = T.label === id ? "" : id; T.page = 1; rendu(); };
+  const groupes = new Map();
+  for (const l of toutes) {
+    const g = l.r[COL_GROUPE];
+    if (g !== undefined && g !== null && g !== "") groupes.set(String(g), l.r.groupe_instructeur_label || String(g));
+  }
+  const optionsGroupe = [
+    ...(S.droits && S.droits.groupes && S.droits.groupes.length ? [{ value: "__mes", label: "Mes groupes" }] : []),
+    { value: "", label: "Tous les groupes" },
+    ...[...groupes].sort((a, b) => a[1].localeCompare(b[1], "fr")).map(([v, lib]) => ({ value: v, label: lib })),
+  ];
   return h("section", { class: "lbl-panneau", "aria-labelledby": "lbl-titre-filtres" },
     h("h2", { class: "lbl-panneau__titre", id: "lbl-titre-filtres", text: "Rechercher / filtrer les dossiers" }),
     h("div", { class: "lbl-filtres-grille" },
@@ -480,7 +549,14 @@ function panneauFiltres(toutes) {
             inputmode: "numeric", oninput: (e) => { T.recherche = e.target.value.replace(/\D/g, ""); T.page = 1; rendu(); } }),
           h("button", { type: "button", class: "fr-btn", title: "Rechercher", text: "Rechercher" }))),
       selectChamp("Label", [{ value: "", label: "Tous" }, { value: "__sans", label: "Sans label" },
-        ...S.catalogue.map((l) => ({ value: l.id, label: l.nom }))], T.label, (v) => { T.label = v; T.page = 1; rendu(); })),
+        ...S.catalogue.map((l) => ({ value: l.id, label: l.nom }))], T.label, (v) => { T.label = v; T.page = 1; rendu(); }),
+      groupesConnus()
+        ? selectChamp("Groupe instructeur", optionsGroupe, filtreGroupe(), (v) => { T.groupe = v; T.page = 1; rendu(); })
+        : null),
+    S.records.length && !groupesConnus() && S.droits && S.droits.controle_instructeurs
+      ? h("p", { class: "lbl-mention", text: "La table des dossiers n'a pas de colonne groupe_instructeur_number (synchronisée par OTP) : "
+        + "le tableau ne peut pas filtrer par groupe instructeur. Les actions restent contrôlées par le serveur." })
+      : null,
     h("div", { class: "lbl-etat-des-lieux" },
       h("span", { class: "lbl-mention", text: "État des lieux :" }),
       h("div", { class: "lbl-tags lbl-filtres", role: "group", "aria-label": "Filtrer par label" },
@@ -530,8 +606,12 @@ function panneauPersonnaliser() {
           }))
         : h("p", { class: "lbl-mention", text: "Toutes les colonnes sont affichées." })),
     h("div", { class: "lbl-personnaliser__pied" },
-      h("p", { class: "lbl-mention", text: "Le tableau montre déjà vos changements. Enregistrez pour les conserver dans le document Grist." }),
+      h("p", { class: "lbl-mention", text: proprietaire()
+        ? "Le tableau montre déjà vos changements. Enregistrer : pour vous, et comme configuration par défaut du document."
+        : "Le tableau montre déjà vos changements. Enregistrer : pour vous, dans ce navigateur." }),
       h("div", { class: "lbl-actions" },
+        S.T.colonnesPerso ? h("button", { type: "button", class: "fr-link fr-link--sm lbl-lien", onclick: reinitialiserColonnes },
+          "Revenir à la configuration du document") : null,
         bouton("Annuler", fermerPersonnaliser, { type: "secondary", taille: "sm" }),
         bouton("Enregistrer", sauverPersonnaliser, { taille: "sm" }))));
 }
@@ -613,7 +693,7 @@ function menuAjout(l) {
 
 function vueDossiers() {
   const T = S.T;
-  const { toutes, lignes } = lignesFiltrees();
+  const { toutes, perimetre, lignes } = lignesFiltrees();
   const presents = new Set(toutes.map((l) => l.num));
   const permis = new Set(toutes.filter(actionnable).map((l) => l.num));
   for (const n of [...T.selection]) if (!presents.has(n) || !permis.has(n)) T.selection.delete(n); // sortis du périmètre
@@ -650,7 +730,7 @@ function vueDossiers() {
             ? [bouton("Ajouter un label", () => { S.ajoutPour = S.ajoutPour === l.num ? null : l.num; rendu(); },
               { type: "secondary", taille: "sm", ic: "plus" }),
             S.ajoutPour === l.num ? menuAjout(l) : null]
-            : h("span", { class: "lbl-mention", text: horsGroupes(l)
+            : h("span", { class: "lbl-mention", text: !S.droits ? "…" : horsGroupes(l)
               ? `Hors de vos groupes${l.r.groupe_instructeur_label ? ` (${l.r.groupe_instructeur_label})` : ""}` : "Lecture seule" }))))))))));
 
   const pagination = pages > 1 ? h("nav", { class: "fr-pagination", "aria-label": "Pagination" },
@@ -662,7 +742,7 @@ function vueDossiers() {
         disabled: T.page >= pages, onclick: () => { T.page++; rendu(); } }, "Suivante")))) : null;
 
   return [
-    panneauFiltres(toutes),
+    panneauFiltres(toutes, perimetre),
     h("div", { class: "lbl-entre lbl-entre--centre" },
       h("h2", { class: "fr-h4 fr-mb-0", text: pluriel(lignes.length, "dossier", "dossiers") }),
       h("button", {
@@ -1245,8 +1325,8 @@ document.addEventListener("keydown", (e) => {
 
 grist.ready({ requiredAccess: "full", allowSelectBy: false });
 grist.onOptions((options) => {
-  const c = options && Array.isArray(options.colonnes) ? options.colonnes : [];
-  S.T.colonnes = c.filter((x) => typeof x === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,99}$/.test(x));
+  S.T.colonnesDoc = colonnesValides(options && options.colonnes);
+  appliquerColonnes();
   rendu();
 });
 // « normal » : toutes les colonnes de la table, même masquées dans le widget (dont groupe_instructeur_number

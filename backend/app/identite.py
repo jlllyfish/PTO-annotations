@@ -12,6 +12,7 @@ Un utilisateur en lecture seule ne peut pas écrire la sonde : il reste anonyme,
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import secrets
@@ -99,16 +100,19 @@ class Identification:
                 if exc.status in (401, 403):
                     return None  # lecture seule
                 raise
-            rows = await service.sql(f'SELECT * FROM "{SESSIONS}" WHERE jeton = ?', [jeton])  # noqa: S608  # nosec B608
-            # Ménage : la sonde, et toute sonde oubliée de plus d'une heure
-            vieilles = await service.sql(f'SELECT id FROM "{SESSIONS}" WHERE cree_le < ?',  # noqa: S608  # nosec B608
-                                         [time.time() - 3600])
-            ids = {r["id"] for r in rows} | {r["id"] for r in vieilles}
-            if ids:
-                await service.supprimer(SESSIONS, sorted(ids))
+            # Sonde + sondes oubliées (> 1 h), formules et membres : lus en parallèle
+            lus, colonnes, membres = await asyncio.gather(
+                service.sql(f'SELECT * FROM "{SESSIONS}" WHERE jeton = ? OR cree_le < ?',  # noqa: S608  # nosec B608
+                            [jeton, time.time() - 3600]),
+                service.colonnes(SESSIONS),
+                self._liste_membres(service, doc_id),
+            )
+            if ids := sorted(r["id"] for r in lus):
+                await service.supprimer(SESSIONS, ids)
+            rows = [r for r in lus if r.get("jeton") == jeton]
             if len(rows) != 1:
                 raise IdentiteDouteuse("sonde d'identité introuvable")
-            if not triggers_conformes(await service.colonnes(SESSIONS)):
+            if not triggers_conformes(colonnes):
                 await reparer_triggers(service)
                 log.warning("Formules de LBL_Sessions modifiées dans le document %s : réparées, identification refusée",
                             doc_id)
@@ -119,7 +123,7 @@ class Identification:
             except (TypeError, ValueError):
                 raise IdentiteDouteuse("identifiant Grist absent") from None
             email = str(sonde.get("email") or "").strip().lower()
-            membre = (await self._liste_membres(service, doc_id)).get(user_id)
+            membre = membres.get(user_id)
             if not membre or str(membre.get("email") or "").strip().lower() != email or not email:
                 raise IdentiteDouteuse("identité incohérente avec les membres du document")
             return Identite(email=email, user_id=user_id, nom=str(sonde.get("nom") or ""), role=role_effectif(membre))
