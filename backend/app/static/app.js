@@ -109,7 +109,8 @@ const pluriel = (n, un, plusieurs) => `${n} ${n > 1 ? plusieurs : un}`;
 const S = {
   contexte: null,
   demarche: null,
-  droits: null,           // {utilisateur, groupes, peut_agir, proprietaire, raison, controle_instructeurs} (certifié serveur)
+  droits: null,
+  groupesDossiers: new Map(), // n° de dossier → {numero, libelle}, tenu par la synchro (LBL_Groupes_Dossiers)           // {utilisateur, groupes, peut_agir, proprietaire, raison, controle_instructeurs} (certifié serveur)
   catalogue: [],          // [{id, nom, couleur}]
   records: [],            // lignes transmises au widget
   onglet: "dossiers",
@@ -210,7 +211,7 @@ async function chargerDemarche() {
   S.T.groupe = null;
   chargerColonnesPerso();
   const droits = api("GET", `${base()}/droits`).catch((e) => ({ erreur: e.message }));
-  const journal = chargerJournal();
+  const journal = Promise.all([chargerJournal(), chargerGroupes()]);
   const [cat, synchro] = await Promise.all([api("GET", `${base()}/catalogue`), api("GET", `${base()}/synchro`)]);
   S.catalogue = cat.labels;
   S.synchro = synchro;
@@ -225,15 +226,22 @@ const proprietaire = () => Boolean(S.droits && S.droits.proprietaire);
 const mesGroupes = () => new Set(((S.droits && S.droits.groupes) || []).map((g) => g.numero));
 
 // Dossier hors des groupes instructeurs de l'utilisateur, d'après la colonne d'OTP (si elle existe)
+function groupeDe(l) {
+  const g = l.r.groupe_instructeur_number;
+  if (g !== undefined && g !== null && g !== "") return { numero: Number(g), libelle: l.r.groupe_instructeur_label || String(g) };
+  return S.groupesDossiers.get(String(l.num)) || null;
+}
+
 function horsGroupes(l) {
   if (!S.droits || !S.droits.controle_instructeurs) return false;
-  const g = l.r.groupe_instructeur_number;
-  if (g === undefined || g === null || g === "") return false; // inconnu ici : le serveur tranchera
-  return !mesGroupes().has(Number(g));
+  const g = groupeDe(l);
+  if (!g) return false; // inconnu ici : le serveur tranchera
+  return !mesGroupes().has(g.numero);
 }
 const actionnable = (l) => peutAgir() && !horsGroupes(l);
 const COL_GROUPE = "groupe_instructeur_number";
-const groupesConnus = () => S.records.length > 0 && Object.prototype.hasOwnProperty.call(S.records[0], COL_GROUPE);
+const groupesConnus = () => S.groupesDossiers.size > 0
+  || (S.records.length > 0 && Object.prototype.hasOwnProperty.call(S.records[0], COL_GROUPE));
 // Filtre de groupe effectif : « Mes groupes » par défaut quand on peut le calculer, sinon tous
 function filtreGroupe() {
   if (S.T.groupe !== null) return S.T.groupe;
@@ -257,6 +265,14 @@ function bandeauDroits() {
     d.raison ? badge(d.raison, "fr-badge--warning") : null);
 }
 
+async function chargerGroupes() {
+  const m = new Map();
+  for (const l of await lireTable("LBL_Groupes_Dossiers", (x) => Number(x.demarche) === S.demarche)) {
+    m.set(String(l.dossier_number), { numero: Number(l.groupe), libelle: l.groupe_libelle || String(l.groupe) });
+  }
+  S.groupesDossiers = m;
+}
+
 async function chargerJournal() {
   S.journal = (await lireTable("LBL_Operations", (l) => Number(l.demarche) === S.demarche))
     .sort((a, b) => (b.cree_le || 0) - (a.cree_le || 0) || b.id - a.id);
@@ -271,6 +287,7 @@ async function suivreSynchro() {
   }
   const t = S.synchro.tache;
   if (t && t.statut === "ok") {
+    await chargerGroupes();
     const b = t.bilan;
     S.message = { type: "success", titre: "Synchronisation terminée",
       texte: `${pluriel(b.dossiers_lus, "dossier lu", "dossiers lus")}, ${b.dossiers_maj} mis à jour dans Grist (${b.duree_s} s).` };
@@ -504,8 +521,8 @@ function lignesFiltrees() {
   const toutes = S.records.map((r) => ({ r, num: numeroDe(r), labels: labelsDuRecord(r) })).filter((l) => l.num);
   let lignes = toutes;
   const fg = filtreGroupe();
-  if (fg === "__mes") { const mes = mesGroupes(); lignes = lignes.filter((l) => mes.has(Number(l.r[COL_GROUPE]))); }
-  else if (fg) lignes = lignes.filter((l) => String(l.r[COL_GROUPE]) === fg);
+  if (fg === "__mes") { const mes = mesGroupes(); lignes = lignes.filter((l) => { const g = groupeDe(l); return g && mes.has(g.numero); }); }
+  else if (fg) lignes = lignes.filter((l) => { const g = groupeDe(l); return g && String(g.numero) === fg; });
   const perimetre = lignes; // base de l'état des lieux : le filtre de groupe s'applique aux compteurs
   if (T.recherche) lignes = lignes.filter((l) => String(l.num).includes(T.recherche));
   if (T.etat) lignes = lignes.filter((l) => l.r.state === T.etat);
@@ -529,8 +546,8 @@ function panneauFiltres(toutes, perimetre) {
   const filtrer = (id) => () => { T.label = T.label === id ? "" : id; T.page = 1; rendu(); };
   const groupes = new Map();
   for (const l of toutes) {
-    const g = l.r[COL_GROUPE];
-    if (g !== undefined && g !== null && g !== "") groupes.set(String(g), l.r.groupe_instructeur_label || String(g));
+    const g = groupeDe(l);
+    if (g) groupes.set(String(g.numero), g.libelle);
   }
   const optionsGroupe = [
     ...(S.droits && S.droits.groupes && S.droits.groupes.length ? [{ value: "__mes", label: "Mes groupes" }] : []),
@@ -554,8 +571,8 @@ function panneauFiltres(toutes, perimetre) {
         ? selectChamp("Groupe instructeur", optionsGroupe, filtreGroupe(), (v) => { T.groupe = v; T.page = 1; rendu(); })
         : null),
     S.records.length && !groupesConnus() && S.droits && S.droits.controle_instructeurs
-      ? h("p", { class: "lbl-mention", text: "La table des dossiers n'a pas de colonne groupe_instructeur_number (synchronisée par OTP) : "
-        + "le tableau ne peut pas filtrer par groupe instructeur. Les actions restent contrôlées par le serveur." })
+      ? alerte("info", null, "Les groupes instructeurs des dossiers ne sont pas encore connus : lancez une « Relecture complète » "
+        + "pour les récupérer dans Démarche Numérique. En attendant, tous les dossiers sont affichés ; les actions restent contrôlées par le serveur.")
       : null,
     h("div", { class: "lbl-etat-des-lieux" },
       h("span", { class: "lbl-mention", text: "État des lieux :" }),
@@ -731,7 +748,7 @@ function vueDossiers() {
               { type: "secondary", taille: "sm", ic: "plus" }),
             S.ajoutPour === l.num ? menuAjout(l) : null]
             : h("span", { class: "lbl-mention", text: !S.droits ? "…" : horsGroupes(l)
-              ? `Hors de vos groupes${l.r.groupe_instructeur_label ? ` (${l.r.groupe_instructeur_label})` : ""}` : "Lecture seule" }))))))))));
+              ? `Hors de vos groupes${groupeDe(l) ? ` (${groupeDe(l).libelle})` : ""}` : "Lecture seule" }))))))))));
 
   const pagination = pages > 1 ? h("nav", { class: "fr-pagination", "aria-label": "Pagination" },
     h("ul", { class: "fr-pagination__list" },

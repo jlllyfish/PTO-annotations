@@ -55,6 +55,7 @@ class Bilan:
     labels_catalogue: int = 0
     duree_s: float = 0.0
     numeros_maj: list[str] = field(default_factory=list)
+    groupes_maj: int = 0  # groupes instructeurs de dossiers enregistrés ou changés
     journal_purge: int = 0  # entrées de journal supprimées par la vidange automatique
     regles: list[dict[str, Any]] = field(default_factory=list)  # règles automatiques exécutées ensuite
 
@@ -133,6 +134,35 @@ async def lignes_grist(grist: GristClient, table: str, numeros: Sequence[str] | 
     return {_numero(r["dossier_number"]): r for r in rows}
 
 
+GROUPES = "LBL_Groupes_Dossiers"
+
+
+async def _maj_groupes(grist: GristClient, n: int, dossiers: Sequence[DossierLabels], *, complete: bool) -> int:
+    """Mémorise le groupe instructeur de chaque dossier lu (seules les différences sont écrites)."""
+    rows = await grist.sql(f'SELECT id, dossier_number, groupe, groupe_libelle FROM "{GROUPES}" WHERE demarche = ?',  # noqa: S608  # nosec B608
+                           [n])
+    connus = {_numero(r["dossier_number"]): r for r in rows}
+    ajouts, maj, vus = [], [], set()
+    for d in dossiers:
+        if d.groupe is None:
+            continue
+        num = str(d.numero)
+        vus.add(num)
+        champs = {"groupe": int(d.groupe), "groupe_libelle": d.groupe_libelle or ""}
+        r = connus.get(num)
+        if r is None:
+            ajouts.append({"demarche": n, "dossier_number": num, **champs})
+        elif (r.get("groupe"), r.get("groupe_libelle") or "") != (champs["groupe"], champs["groupe_libelle"]):
+            maj.append({"id": r["id"], "fields": champs})
+    if ajouts:
+        await grist.ajouter(GROUPES, ajouts)
+    if maj:
+        await grist.maj(GROUPES, maj)
+    if complete and (disparus := [r["id"] for num, r in connus.items() if num not in vus]):
+        await grist.supprimer(GROUPES, disparus)
+    return len(ajouts) + len(maj)
+
+
 async def synchroniser(
     dn: DNClient,
     grist: GristClient,
@@ -195,6 +225,7 @@ async def synchroniser(
         prog.etape = "écriture Grist"
         if a_ecrire:
             await grist.maj(demarche.table, a_ecrire)
+        bilan.groupes_maj = await _maj_groupes(grist, n, dossiers, complete=mode == Mode.COMPLETE)
         bilan.dossiers_maj = len(a_ecrire)
         bilan.duree_s = round(time.monotonic() - t0, 2)
 

@@ -140,3 +140,19 @@ async def test_schema_complete_colonnes_manquantes():
     await g.creer_table("LBL_Etat", [("demarche", "Int")])
     await run(FakeDN({1: {"LA"}}), g, Mode.COMPLETE)
     assert "curseur" in g.types["LBL_Etat"]
+
+
+@pytest.mark.anyio
+async def test_groupes_instructeurs_memorises():
+    g = grist_initial()
+    dn = FakeDN({1: {"LA"}, 2: set(), 3: set()})
+    dn.groupe_de = {1: 394761}
+    b = await run(dn, g, Mode.COMPLETE)
+    groupes = {r["dossier_number"]: (r["groupe"], r["groupe_libelle"]) for r in g.rows("LBL_Groupes_Dossiers")}
+    assert b.groupes_maj == 3 and groupes["1"] == (394761, "G394761") and groupes["2"] == (394762, "G394762")
+    # réaffectation d'un dossier, disparition d'un autre : seuls les écarts sont écrits
+    dn.groupe_de = {1: 394762}
+    del dn.etat[3]
+    b = await run(dn, g, Mode.COMPLETE)
+    groupes = {r["dossier_number"]: r["groupe"] for r in g.rows("LBL_Groupes_Dossiers")}
+    assert b.groupes_maj == 1 and groupes == {"1": 394762, "2": 394762}

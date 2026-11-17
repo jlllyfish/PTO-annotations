@@ -47,6 +47,9 @@ TABLES: dict[str, list[tuple[str, str | dict[str, Any]]]] = {
     ],
     # Dossiers déjà traités par chaque règle (pour ne pas refaire ce qu'une personne a défait)
     "LBL_Regles_Traces": [("regle", "Int"), ("dossier_number", "Text")],
+    # Groupe instructeur de chaque dossier (lu dans DN à la synchro) : OTP ne le met pas dans la table des dossiers
+    "LBL_Groupes_Dossiers": [("demarche", "Int"), ("dossier_number", "Text"), ("groupe", "Int"),
+                             ("groupe_libelle", "Text")],
     # Sondes d'identité (une ligne éphémère par vérification ; supprimée aussitôt lue)
     "LBL_Sessions": [("jeton", "Text"), ("cree_le", DT)] + [(c, _trigger(f)) for c, f in TRIGGERS_SESSIONS.items()],
 }

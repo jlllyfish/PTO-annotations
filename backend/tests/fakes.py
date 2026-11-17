@@ -157,7 +157,7 @@ class FakeDN:
 
     def _d(self, n):
         groupe = getattr(self, "groupe_de", {}).get(n, 394762)
-        return DossierLabels(n, f"D{n}", frozenset(self.etat[n]), groupe=groupe)
+        return DossierLabels(n, f"D{n}", frozenset(self.etat[n]), groupe=groupe, groupe_libelle=f"G{groupe}")
 
     async def catalogue(self, demarche, *, frais=False):
         if self.erreur:

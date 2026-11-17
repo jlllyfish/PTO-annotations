@@ -59,7 +59,8 @@ class DossierLabels:
     labels: frozenset[str]
     modifie_le: str | None = None
     demarche: int | None = None
-    groupe: int | None = None  # numéro du groupe instructeur (lecture ciblée uniquement)
+    groupe: int | None = None  # numéro du groupe instructeur
+    groupe_libelle: str | None = None
 
 
 @dataclass(frozen=True)
@@ -113,7 +114,7 @@ query Groupes($n: Int!) {
 Q_CATALOGUE = """
 query Catalogue($n: Int!) { demarche(number: $n) { labels { id name color } } }
 """
-_DOSSIER_FIELDS = "id number dateDerniereModification labels { id }"
+_DOSSIER_FIELDS = "id number dateDerniereModification labels { id } groupeInstructeur { number label }"
 Q_DOSSIERS = f"""
 query Dossiers($n: Int!, $after: String, $since: ISO8601DateTime) {{
   demarche(number: $n) {{
@@ -140,7 +141,7 @@ def _query_lecture_ciblee(n: int) -> str:
     if not 1 <= n <= LOT_LECTURE:
         raise ValueError("taille de lot invalide")
     decl = ", ".join(f"$n{k}: Int!" for k in range(n))
-    champs = f"{_DOSSIER_FIELDS} demarche {{ number }} groupeInstructeur {{ number }}"
+    champs = f"{_DOSSIER_FIELDS} demarche {{ number }}"
     body = " ".join(f"d{k}: dossier(number: $n{k}) {{ {champs} }}" for k in range(n))
     return f"query Cible({decl}) {{ {body} }}"
 
@@ -164,6 +165,7 @@ def _dossier(node: dict[str, Any]) -> DossierLabels:
         modifie_le=node.get("dateDerniereModification"),
         demarche=(node.get("demarche") or {}).get("number"),
         groupe=(node.get("groupeInstructeur") or {}).get("number"),
+        groupe_libelle=(node.get("groupeInstructeur") or {}).get("label"),
     )
 
 

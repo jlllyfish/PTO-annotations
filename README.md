@@ -100,8 +100,9 @@ n'ont pas été altérées et recoupe avec la liste des membres du document (rô
 | Ajouter / retirer un label, file d'attente | éditeur ou propriétaire **et** instructeur DN du groupe du dossier |
 | Règles automatiques, vidage du journal | propriétaires du document |
 
-- Les groupes instructeurs sont lus **dans DN** (source de vérité, cache 10 min) ; la colonne
-  `groupe_instructeur_number` d'OTP sert seulement à griser les lignes dans le widget.
+- Les groupes instructeurs sont lus **dans DN** (source de vérité, cache 10 min). Le groupe de chaque dossier
+  est mémorisé à la synchro dans `LBL_Groupes_Dossiers` (OTP ne le met pas dans la table des dossiers) : le widget
+  s'en sert pour filtrer « Mes groupes » et griser les autres. Après installation : une **Relecture complète**.
 - Hors de ses groupes : refus journalisé (« Hors de vos groupes instructeurs ») ; en file d'attente, la ligne reste
   en attente pour une personne habilitée.
 - Chaque opération est journalisée avec l'adresse certifiée (`auteur`).
