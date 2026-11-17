@@ -22,3 +22,4 @@ documents:
         nom: Western Pony Club
         dn_token: DN_TOKEN_TEST          # un jeton par démarche (ou partagé) — moindre privilège
         # table_dossiers: Demarche_149930_dossiers   # défaut, table créée par OTP
+        # controle_instructeurs: true   # défaut : n'agir que sur les dossiers de ses groupes instructeurs DN

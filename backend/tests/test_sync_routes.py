@@ -49,7 +49,7 @@ def faux_sync(monkeypatch):
 
     monkeypatch.setattr(sync_routes, "vidange_automatique", fausse_vidange)
 
-    async def fausses_regles(dn, grist, d, *, cle_schema):
+    async def fausses_regles(dn, grist, d, *, cle_schema, **_kw):
         appels.append(("regles", d.numero))
         return [{"regle": "Test", "bilan": None}]
 

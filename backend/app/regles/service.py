@@ -7,6 +7,8 @@ qu'elle a produit, c'est qu'une personne est revenue dessus : la règle le laiss
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import time
 from dataclasses import asdict
@@ -25,6 +27,27 @@ from .moteur import DefinitionRegle, RegleInvalide, champs_disponibles, compiler
 REGLES = "LBL_Regles"
 TRACES = "LBL_Regles_Traces"
 MAX_PAR_EXECUTION = 500
+MSG_SIGNATURE = "Règle modifiée hors de l'outil : un propriétaire doit la réenregistrer"
+
+
+def cle_regles(service_key: str) -> bytes:
+    """Clé de signature des règles, dérivée de la clé de service (jamais stockée dans Grist)."""
+    return hmac.new(service_key.encode(), b"pto-labels/regles/v1", hashlib.sha256).digest()
+
+
+def signer(cle: bytes, doc: str, regle_id: int, d: DemarcheConfig, regle: DefinitionRegle) -> str:
+    """Signature HMAC d'une règle : un éditeur qui modifierait LBL_Regles directement dans Grist
+    (conditions, label, mode…) invalide la signature, et la règle n'est plus exécutée."""
+    contenu = json.dumps({"doc": doc, "id": regle_id, "demarche": d.numero, "regle": regle.model_dump(mode="json")},
+                         sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hmac.new(cle, contenu.encode(), hashlib.sha256).hexdigest()
+
+
+def _signature_ok(cle: bytes | None, doc: str, regle_id: int, d: DemarcheConfig, regle: DefinitionRegle,
+                  signature: Any) -> bool:
+    if cle is None:
+        return True
+    return isinstance(signature, str) and hmac.compare_digest(signer(cle, doc, regle_id, d, regle), signature)
 
 
 def _numero(v: Any) -> str:
@@ -33,7 +56,8 @@ def _numero(v: Any) -> str:
     return str(v).strip()
 
 
-async def lister(grist: GristClient, d: DemarcheConfig, *, cle_schema: str) -> list[dict[str, Any]]:
+async def lister(grist: GristClient, d: DemarcheConfig, *, cle_schema: str,
+                 cle: bytes | None = None) -> list[dict[str, Any]]:
     await assurer_schema(grist, cle_schema)
     rows = await grist.sql(
         f'SELECT * FROM "{REGLES}" WHERE demarche = ? ORDER BY id', [d.numero]  # noqa: S608  # nosec B608
@@ -46,6 +70,8 @@ async def lister(grist: GristClient, d: DemarcheConfig, *, cle_schema: str) -> l
                 "verrou": bool(r["verrou"]), "groupes": json.loads(r["conditions"] or "[]"),
             })
             erreur = None
+            if not _signature_ok(cle, cle_schema, r["id"], d, definition, r.get("signature")):
+                erreur = MSG_SIGNATURE
         except (ValidationError, ValueError, TypeError) as exc:
             definition, erreur = None, f"Règle illisible : {str(exc)[:200]}"
         out.append({
@@ -56,21 +82,28 @@ async def lister(grist: GristClient, d: DemarcheConfig, *, cle_schema: str) -> l
     return out
 
 
-async def _definition(grist: GristClient, d: DemarcheConfig, regle_id: int) -> DefinitionRegle:
+async def _definition(grist: GristClient, d: DemarcheConfig, regle_id: int, *,
+                      cle: bytes | None = None, doc: str = "") -> DefinitionRegle:
     rows = await grist.sql(
         f'SELECT * FROM "{REGLES}" WHERE id = ? AND demarche = ?', [regle_id, d.numero]  # noqa: S608  # nosec B608
     )
     if not rows:
         raise RegleInvalide("règle introuvable")
     r = rows[0]
-    return DefinitionRegle.model_validate({
-        "nom": r["nom"], "action": r["action"], "label_id": r["label_id"], "mode": r["mode"],
-        "verrou": bool(r["verrou"]), "groupes": json.loads(r["conditions"] or "[]"),
-    })
+    try:
+        regle = DefinitionRegle.model_validate({
+            "nom": r["nom"], "action": r["action"], "label_id": r["label_id"], "mode": r["mode"],
+            "verrou": bool(r["verrou"]), "groupes": json.loads(r["conditions"] or "[]"),
+        })
+    except (ValidationError, ValueError, TypeError):
+        raise RegleInvalide("règle illisible") from None
+    if not _signature_ok(cle, doc, regle_id, d, regle, r.get("signature")):
+        raise RegleInvalide(MSG_SIGNATURE)
+    return regle
 
 
 async def enregistrer(dn: DNClient, grist: GristClient, d: DemarcheConfig, regle: DefinitionRegle, *,
-                      cle_schema: str, regle_id: int | None = None) -> int:
+                      cle_schema: str, regle_id: int | None = None, cle: bytes | None = None) -> int:
     """Crée ou met à jour une règle après l'avoir validée contre le schéma et le catalogue DN."""
     await assurer_schema(grist, cle_schema)
     champs = await champs_disponibles(grist, d)
@@ -85,16 +118,22 @@ async def enregistrer(dn: DNClient, grist: GristClient, d: DemarcheConfig, regle
         "modifie_le": time.time(),
     }
     if regle_id is None:
-        await grist.ajouter(REGLES, [champs_ligne])
+        await grist.ajouter(REGLES, [{**champs_ligne, "signature": ""}])
         rows = await grist.sql(f'SELECT MAX(id) AS id FROM "{REGLES}" WHERE demarche = ?', [d.numero])  # noqa: S608  # nosec B608
-        return int(rows[0]["id"])
-    await _definition(grist, d, regle_id)  # vérifie que la règle appartient bien à cette démarche
+        regle_id = int(rows[0]["id"])
+    else:
+        await _definition(grist, d, regle_id)  # vérifie que la règle appartient bien à cette démarche
+    if cle is not None:
+        champs_ligne["signature"] = signer(cle, cle_schema, regle_id, d, regle)
     await grist.maj(REGLES, [{"id": regle_id, "fields": champs_ligne}])
     return regle_id
 
 
 async def supprimer(grist: GristClient, d: DemarcheConfig, regle_id: int) -> None:
-    await _definition(grist, d, regle_id)
+    rows = await grist.sql(f'SELECT id FROM "{REGLES}" WHERE id = ? AND demarche = ?',  # noqa: S608  # nosec B608
+                           [regle_id, d.numero])
+    if not rows:
+        raise RegleInvalide("règle introuvable")
     traces = await grist.sql(f'SELECT id FROM "{TRACES}" WHERE regle = ?', [regle_id])  # noqa: S608  # nosec B608
     if traces:
         await grist.supprimer(TRACES, [t["id"] for t in traces])
@@ -131,15 +170,25 @@ async def evaluer(grist: GristClient, d: DemarcheConfig, regle: DefinitionRegle,
 
 
 async def appliquer(dn: DNClient, grist: GristClient, d: DemarcheConfig, regle_id: int, *,
-                    cle_schema: str, maintenant: float | None = None) -> BilanOps | None:
-    """Exécute une règle enregistrée (500 dossiers au plus par passage) et mémorise les dossiers traités."""
-    regle = await _definition(grist, d, regle_id)
+                    cle_schema: str, maintenant: float | None = None, cle: bytes | None = None,
+                    auteur: str = "") -> BilanOps | None:
+    """Exécute une règle enregistrée (500 dossiers au plus par passage) et mémorise les dossiers traités.
+
+    Avec `cle`, la signature est exigée : une règle modifiée directement dans Grist n'est pas exécutée.
+    """
+    try:
+        regle = await _definition(grist, d, regle_id, cle=cle, doc=cle_schema)
+    except RegleInvalide as exc:
+        if str(exc) == MSG_SIGNATURE:
+            await grist.maj(REGLES, [{"id": regle_id, "fields": {"derniere_execution": time.time(),
+                                                                 "dernier_resultat": MSG_SIGNATURE}}])
+        raise
     ev = await evaluer(grist, d, regle, cle_schema=cle_schema, regle_id=regle_id, maintenant=maintenant)
     numeros = [int(n) for n in ev["_a_faire"][:MAX_PAR_EXECUTION] if n.isdigit()]
     bilan = None
     if numeros:
         bilan = await executer(dn, grist, d, Action(regle.action), regle.label_id, numeros,
-                               source=f"regle:{regle.nom}", cle_schema=cle_schema)
+                               source=f"regle:{regle.nom}", cle_schema=cle_schema, auteur=auteur)
         traites = [n for n, st in bilan.statuts.items() if st in ("applique", "deja_applique")]
         if regle.verrou and traites:
             await grist.upsert(TRACES, [{"regle": regle_id, "dossier_number": str(n)} for n in traites],
@@ -154,14 +203,15 @@ async def appliquer(dn: DNClient, grist: GristClient, d: DemarcheConfig, regle_i
 
 
 async def appliquer_regles_auto(dn: DNClient, grist: GristClient, d: DemarcheConfig, *,
-                                cle_schema: str) -> list[dict[str, Any]]:
+                                cle_schema: str, cle: bytes | None = None) -> list[dict[str, Any]]:
     """Tâche planifiée : exécute toutes les règles en mode automatique de la démarche."""
     resultats = []
-    for r in await lister(grist, d, cle_schema=cle_schema):
+    for r in await lister(grist, d, cle_schema=cle_schema, cle=cle):
         if not r["definition"] or r["definition"]["mode"] != "auto":
             continue
         try:
-            bilan = await appliquer(dn, grist, d, r["id"], cle_schema=cle_schema)
+            bilan = await appliquer(dn, grist, d, r["id"], cle_schema=cle_schema, cle=cle,
+                                    auteur="tache_planifiee")
             resultats.append({"regle": r["definition"]["nom"], "bilan": asdict(bilan) if bilan else None})
         except Exception as exc:  # une règle en échec n'empêche pas les suivantes
             resultats.append({"regle": r["definition"]["nom"], "erreur": str(exc)[:300]})

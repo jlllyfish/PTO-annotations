@@ -83,7 +83,29 @@ portant sur les colonnes OTP (dossier, champs du formulaire, annotations privée
   (mémoire dans `LBL_Regles_Traces`).
 - Règles stockées dans `LBL_Regles` (conditions en JSON, revalidées par le serveur à chaque usage).
 - Sécurité : champs vérifiés contre le schéma réel du document, opérateurs en liste fermée, valeurs en paramètres SQL.
-- Conseil : dans Grist, **règles d'accès** sur `LBL_Regles` pour réserver la modification aux propriétaires du document.
+- Création, modification, suppression et exécution manuelle **réservées aux propriétaires** du document Grist.
+- Chaque règle est **signée** par le serveur (HMAC dérivé de la clé de service) : une règle modifiée directement
+  dans la table `LBL_Regles` n'est plus exécutée tant qu'un propriétaire ne l'a pas réenregistrée depuis le widget.
+
+## Qui peut faire quoi
+
+L'identité n'est jamais déclarée par le navigateur : le serveur fait écrire une ligne « sonde » dans `LBL_Sessions`
+avec le jeton de l'utilisateur ; Grist y inscrit lui-même `user.Email` / `user.UserID` (formules déclenchées qui
+se recalculent si on tente de les forcer). Le serveur relit la sonde avec la clé de service, vérifie que les formules
+n'ont pas été altérées et recoupe avec la liste des membres du document (rôle effectif).
+
+| Action | Qui |
+|---|---|
+| Consulter, synchroniser | tout utilisateur du document |
+| Ajouter / retirer un label, file d'attente | éditeur ou propriétaire **et** instructeur DN du groupe du dossier |
+| Règles automatiques, vidage du journal | propriétaires du document |
+
+- Les groupes instructeurs sont lus **dans DN** (source de vérité, cache 10 min) ; la colonne
+  `groupe_instructeur_number` d'OTP sert seulement à griser les lignes dans le widget.
+- Hors de ses groupes : refus journalisé (« Hors de vos groupes instructeurs ») ; en file d'attente, la ligne reste
+  en attente pour une personne habilitée.
+- Chaque opération est journalisée avec l'adresse certifiée (`auteur`).
+- `controle_instructeurs: false` sur une démarche désactive le contrôle des groupes (pas celui de l'identité).
 
 ## Qualité et sécurité
 

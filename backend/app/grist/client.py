@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -48,6 +48,10 @@ class Colonne:
     type: str  # Text, Numeric, Int, Bool, Date, DateTime:<tz>, Choice, ChoiceList, Ref:<T>…
     libelle: str
     choix: tuple[str, ...] = ()  # valeurs déclarées d'une colonne Choice / ChoiceList
+    # Métadonnées de formule (formula, isFormula, recalcWhen, recalcDeps, colRef) : contrôle des formules déclenchées
+    meta: dict[str, Any] = field(default_factory=dict, compare=False, hash=False)
+
+META_FORMULE = ("formula", "isFormula", "recalcWhen", "recalcDeps", "colRef")
 
 
 def _choix(fields: dict[str, Any]) -> tuple[str, ...]:
@@ -111,7 +115,8 @@ class GristClient:
         ident(table)
         body = await self._req("GET", f"/tables/{table}/columns")
         return [
-            Colonne(c["id"], c["fields"].get("type", "Any"), c["fields"].get("label") or c["id"], _choix(c["fields"]))
+            Colonne(c["id"], c["fields"].get("type", "Any"), c["fields"].get("label") or c["id"], _choix(c["fields"]),
+                    {k: c["fields"].get(k) for k in META_FORMULE})
             for c in body.get("columns", [])
             if not c["id"].startswith("gristHelper_")
         ]
@@ -122,15 +127,28 @@ class GristClient:
 
     # ------------------------------------------------------------------ schéma
 
-    async def creer_table(self, table: str, colonnes: Sequence[tuple[str, str]]) -> None:
-        ident(table)
-        cols = [{"id": ident(c, kind="colonne") and c, "fields": {"type": t}} for c, t in colonnes]
-        await self._req("POST", "/tables", json={"tables": [{"id": table, "columns": cols}]})
+    @staticmethod
+    def _defs(colonnes: Sequence[tuple[str, str | dict[str, Any]]]) -> list[dict[str, Any]]:
+        """(id, type) ou (id, {champs de colonne}) → définitions de colonnes de l'API."""
+        return [{"id": ident(c, kind="colonne") and c, "fields": t if isinstance(t, dict) else {"type": t}}
+                for c, t in colonnes]
 
-    async def ajouter_colonnes(self, table: str, colonnes: Sequence[tuple[str, str]]) -> None:
+    async def creer_table(self, table: str, colonnes: Sequence[tuple[str, str | dict[str, Any]]]) -> None:
         ident(table)
-        cols = [{"id": ident(c, kind="colonne") and c, "fields": {"type": t}} for c, t in colonnes]
-        await self._req("POST", f"/tables/{table}/columns", json={"columns": cols})
+        await self._req("POST", "/tables", json={"tables": [{"id": table, "columns": self._defs(colonnes)}]})
+
+    async def ajouter_colonnes(self, table: str, colonnes: Sequence[tuple[str, str | dict[str, Any]]]) -> None:
+        ident(table)
+        await self._req("POST", f"/tables/{table}/columns", json={"columns": self._defs(colonnes)})
+
+    async def maj_colonnes(self, table: str, colonnes: Sequence[dict[str, Any]]) -> None:
+        ident(table)
+        await self._req("PATCH", f"/tables/{table}/columns", json={"columns": list(colonnes)})
+
+    async def membres(self) -> list[dict[str, Any]]:
+        """Membres du document (exige les droits de propriétaire) : id, email, access, parentAccess."""
+        body = await self._req("GET", "/access")
+        return list(body.get("users", []))
 
     # ------------------------------------------------------------------ écriture
 

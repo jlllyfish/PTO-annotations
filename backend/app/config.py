@@ -45,6 +45,8 @@ class DemarcheConfig(_Strict):
     nom: str = Field(min_length=1, max_length=200)
     dn_token: str = Field(pattern=ENV_NAME_RE, description="Nom de la variable portant le jeton DN")
     table_dossiers: str | None = None
+    # Contrôle instructeur : n'agir que sur les dossiers des groupes instructeurs DN de l'utilisateur
+    controle_instructeurs: bool = True
 
     @field_validator("table_dossiers")
     @classmethod

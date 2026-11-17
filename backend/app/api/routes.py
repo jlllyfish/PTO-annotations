@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Request
 
 from ..config import DemarcheConfig
 from ..dn.client import DNClient
+from ..droits import Droits, calculer
+from ..identite import IdentiteDouteuse
 from ..security import Appelant, AuthError
 
 router = APIRouter()
@@ -42,6 +44,32 @@ def client_dn(request: Request, demarche: DemarcheConfig) -> DNClient:
     return request.app.state.dn_clients(demarche.dn_token)
 
 
+async def identite_de(request: Request, qui: Appelant):
+    try:
+        return await request.app.state.identification.identifier(qui)
+    except IdentiteDouteuse as exc:
+        raise HTTPException(403, f"Identité non vérifiable : {exc}") from None
+
+
+async def droits_de(request: Request, qui: Appelant, d: DemarcheConfig) -> Droits:
+    identite = await identite_de(request, qui)
+    return await calculer(identite, client_dn(request, d), d, request.app.state.groupes)
+
+
+async def exiger_action(request: Request, qui: Appelant, d: DemarcheConfig) -> Droits:
+    droits = await droits_de(request, qui, d)
+    if not droits.peut_agir:
+        raise HTTPException(403, droits.raison_refus() or "Action non autorisée")
+    return droits
+
+
+async def exiger_proprietaire(request: Request, qui: Appelant, d: DemarcheConfig) -> Droits:
+    droits = await droits_de(request, qui, d)
+    if not droits.proprietaire:
+        raise HTTPException(403, "Réservé aux propriétaires du document Grist")
+    return droits
+
+
 @router.get("/health")
 async def health() -> dict[str, bool]:
     return {"ok": True}
@@ -55,6 +83,13 @@ async def contexte(request: Request, qui: Qui) -> dict:
         "demarches": [{"numero": d.numero, "nom": d.nom, "table": d.table} for d in doc.demarches],
         "journal_retention_jours": request.app.state.config.journal_retention_jours,
     }
+
+
+@router.get("/api/demarches/{numero}/droits")
+async def droits(request: Request, qui: Qui, numero: Annotated[int, Path(gt=0)]) -> dict:
+    """Qui est connecté (certifié par Grist), ses groupes instructeurs DN, ce qu'il peut faire."""
+    d = demarche_de(qui, numero)
+    return (await droits_de(request, qui, d)).vue()
 
 
 @router.get("/api/demarches/{numero}/catalogue")

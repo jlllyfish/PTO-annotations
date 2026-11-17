@@ -18,7 +18,7 @@ from ..ops.service import (
     vidange_automatique,
     vider_journal,
 )
-from .routes import Qui, client_dn, demarche_de
+from .routes import Qui, client_dn, demarche_de, exiger_action, exiger_proprietaire
 
 router = APIRouter()
 
@@ -43,8 +43,10 @@ Num = Annotated[int, Path(gt=0)]
 @router.post("/api/demarches/{numero}/operations/apercu")
 async def route_apercu(request: Request, qui: Qui, numero: Num, demande: DemandeApercu) -> dict:
     d = demarche_de(qui, numero)
+    droits = await exiger_action(request, qui, d)
     try:
-        return await apercu(client_dn(request, d), d, demande.action, demande.label_id, demande.numeros)
+        return await apercu(client_dn(request, d), d, demande.action, demande.label_id, demande.numeros,
+                            droits.perimetre)
     except LabelInconnu as exc:
         raise HTTPException(422, str(exc)) from None
 
@@ -52,17 +54,19 @@ async def route_apercu(request: Request, qui: Qui, numero: Num, demande: Demande
 @router.post("/api/demarches/{numero}/operations")
 async def route_operations(request: Request, qui: Qui, numero: Num, demande: DemandeOperations) -> dict:
     d = demarche_de(qui, numero)
+    droits = await exiger_action(request, qui, d)
+    auteur = droits.identite.email
     dn = client_dn(request, d)
     doc = qui.document.grist_doc_id
     try:
         async with qui.grist(request.app.state.grist_transport) as grist:
             if demande.envoyer:
                 bilan = await executer(dn, grist, d, demande.action, demande.label_id, demande.numeros,
-                                       source="manuel", cle_schema=doc)
+                                       source="manuel", cle_schema=doc, perimetre=droits.perimetre, auteur=auteur)
                 await vidange_automatique(grist, d, request.app.state.config.journal_retention_jours, cle_schema=doc)
             else:
                 bilan = await mettre_en_file(dn, grist, d, demande.action, demande.label_id, demande.numeros,
-                                             source="manuel", cle_schema=doc)
+                                             source="manuel", cle_schema=doc, auteur=auteur)
     except LabelInconnu as exc:
         raise HTTPException(422, str(exc)) from None
     sortie = asdict(bilan)
@@ -73,9 +77,11 @@ async def route_operations(request: Request, qui: Qui, numero: Num, demande: Dem
 @router.post("/api/demarches/{numero}/operations/file/envoyer")
 async def route_envoyer_file(request: Request, qui: Qui, numero: Num) -> dict:
     d = demarche_de(qui, numero)
+    droits = await exiger_action(request, qui, d)
     async with qui.grist(request.app.state.grist_transport) as grist:
         doc = qui.document.grist_doc_id
-        bilans = await envoyer_file(client_dn(request, d), grist, d, cle_schema=doc)
+        bilans = await envoyer_file(client_dn(request, d), grist, d, cle_schema=doc,
+                                    perimetre=droits.perimetre, auteur=droits.identite.email)
         await vidange_automatique(grist, d, request.app.state.config.journal_retention_jours, cle_schema=doc)
     return {"lots": [{k: v for k, v in asdict(b).items() if k != "statuts"} for b in bilans]}
 
@@ -83,6 +89,7 @@ async def route_envoyer_file(request: Request, qui: Qui, numero: Num) -> dict:
 @router.post("/api/demarches/{numero}/operations/journal/vider")
 async def route_vider_journal(request: Request, qui: Qui, numero: Num) -> dict:
     d = demarche_de(qui, numero)
+    await exiger_proprietaire(request, qui, d)
     async with qui.grist(request.app.state.grist_transport) as grist:
         n = await vider_journal(grist, d, cle_schema=qui.document.grist_doc_id)
     return {"supprimees": n}

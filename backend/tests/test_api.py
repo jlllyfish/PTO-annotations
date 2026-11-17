@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 
-from .conftest import BASE, DOC, TOKEN, Recorder
+from .conftest import BASE, DOC, TOKEN, Recorder, installer_droits
 
 
 @pytest.fixture
@@ -13,8 +13,10 @@ def api(config):
     dn = Recorder(lambda r: httpx.Response(200, json={"data": {"demarche": {"labels": [
         {"id": "TGFiZWwtNTAzOTAy", "name": "Urgent", "color": "pink_macaron"}]}}}))
     app = create_app(config, dn_transport=dn.transport(), grist_transport=grist.transport())
+    installer_droits(app)
     with TestClient(app, base_url="https://testserver") as c:
         c.dn = dn
+        c.app_ = app
         yield c
 
 
@@ -127,3 +129,30 @@ def test_mode_auto_desactivable(config):
     with TestClient(app, base_url="https://testserver") as c:
         r = c.post("/api/demarches/149930/regles", headers=AUTH, json={**REGLE, "mode": "auto"})
         assert r.status_code == 403
+
+
+def test_droits_vue(api):
+    r = api.get("/api/demarches/149930/droits", headers=AUTH).json()
+    assert r["utilisateur"]["email"] == "camille@agriculture.gouv.fr" and r["peut_agir"] and r["proprietaire"]
+    assert r["groupes"] == [{"numero": 394762, "libelle": "Groupe 394762"}]
+
+
+def test_editeur_sans_groupe_ne_peut_pas_agir(api):
+    installer_droits(api.app_, role="editors", groupes=())
+    body = {"action": "ajouter", "label_id": "TGFiZWwtNTAzOTAy", "numeros": [1]}
+    r = api.post("/api/demarches/149930/operations", headers=AUTH, json=body)
+    assert r.status_code == 403 and "aucun groupe" in r.json()["detail"]
+
+
+def test_lecture_seule_ne_peut_pas_agir(api):
+    installer_droits(api.app_, email=None)
+    body = {"action": "ajouter", "label_id": "TGFiZWwtNTAzOTAy", "numeros": [1]}
+    assert api.post("/api/demarches/149930/operations/apercu", headers=AUTH, json=body).status_code == 403
+
+
+def test_regles_et_vidage_reserves_aux_proprietaires(api):
+    installer_droits(api.app_, role="editors")
+    assert api.post("/api/demarches/149930/regles", headers=AUTH, json=REGLE).status_code == 403
+    assert api.delete("/api/demarches/149930/regles/1", headers=AUTH).status_code == 403
+    assert api.post("/api/demarches/149930/regles/1/appliquer", headers=AUTH).status_code == 403
+    assert api.post("/api/demarches/149930/operations/journal/vider", headers=AUTH).status_code == 403

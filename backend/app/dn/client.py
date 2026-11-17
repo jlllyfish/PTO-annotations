@@ -58,6 +58,15 @@ class DossierLabels:
     labels: frozenset[str]
     modifie_le: str | None = None
     demarche: int | None = None
+    groupe: int | None = None  # numéro du groupe instructeur (lecture ciblée uniquement)
+
+
+@dataclass(frozen=True)
+class GroupeInstructeur:
+    numero: int
+    libelle: str
+    ferme: bool
+    emails: frozenset[str]  # en minuscules
 
 
 class Action(StrEnum):
@@ -95,6 +104,11 @@ _DEJA = {
     Action.RETIRER: ("pas associé",),
 }
 
+Q_GROUPES = """
+query Groupes($n: Int!) {
+  demarche(number: $n) { groupeInstructeurs { number label closed instructeurs { email } } }
+}
+"""
 Q_CATALOGUE = """
 query Catalogue($n: Int!) { demarche(number: $n) { labels { id name color } } }
 """
@@ -125,7 +139,7 @@ def _query_lecture_ciblee(n: int) -> str:
     if not 1 <= n <= LOT_LECTURE:
         raise ValueError("taille de lot invalide")
     decl = ", ".join(f"$n{k}: Int!" for k in range(n))
-    champs = f"{_DOSSIER_FIELDS} demarche {{ number }}"
+    champs = f"{_DOSSIER_FIELDS} demarche {{ number }} groupeInstructeur {{ number }}"
     body = " ".join(f"d{k}: dossier(number: $n{k}) {{ {champs} }}" for k in range(n))
     return f"query Cible({decl}) {{ {body} }}"
 
@@ -148,6 +162,7 @@ def _dossier(node: dict[str, Any]) -> DossierLabels:
         labels=frozenset(lbl["id"] for lbl in node.get("labels") or []),
         modifie_le=node.get("dateDerniereModification"),
         demarche=(node.get("demarche") or {}).get("number"),
+        groupe=(node.get("groupeInstructeur") or {}).get("number"),
     )
 
 
@@ -233,6 +248,14 @@ class DNClient:
     async def catalogue(self, demarche: int) -> list[Label]:
         data = await self._data(Q_CATALOGUE, {"n": demarche})
         return [Label(l["id"], l["name"], l["color"]) for l in data["demarche"]["labels"]]
+
+    async def groupes(self, demarche: int) -> list[GroupeInstructeur]:
+        data = await self._data(Q_GROUPES, {"n": demarche})
+        return [
+            GroupeInstructeur(int(g["number"]), g.get("label") or "", bool(g.get("closed")),
+                              frozenset(str(i.get("email") or "").strip().lower() for i in g.get("instructeurs") or []))
+            for g in (data.get("demarche") or {}).get("groupeInstructeurs") or []
+        ]
 
     async def _pages(self, query: str, variables: dict[str, Any],
                      on_page: Progres | None = None) -> AsyncIterator[list[DossierLabels]]:

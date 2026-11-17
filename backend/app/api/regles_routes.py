@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, Request
 
 from ..regles import service
 from ..regles.moteur import DefinitionRegle, RegleInvalide, champs_disponibles, schema_public, valeurs_proposees
-from .routes import Qui, client_dn, demarche_de
+from .routes import Qui, client_dn, demarche_de, exiger_proprietaire
 
 router = APIRouter(prefix="/api/demarches/{numero}/regles")
 Num = Annotated[int, Path(gt=0)]
@@ -19,6 +19,10 @@ Id = Annotated[int, Path(gt=0)]
 def _verifier_mode(request: Request, regle: DefinitionRegle) -> None:
     if regle.mode == "auto" and not request.app.state.config.regles_auto_autorisees:
         raise HTTPException(403, "Le mode automatique est désactivé dans la configuration du serveur")
+
+
+def _cle(request: Request) -> bytes:
+    return request.app.state.cle_regles
 
 
 def _erreur(exc: RegleInvalide) -> HTTPException:
@@ -48,17 +52,18 @@ async def valeurs(request: Request, qui: Qui, numero: Num,
 async def lister(request: Request, qui: Qui, numero: Num) -> dict:
     d = demarche_de(qui, numero)
     async with qui.grist(request.app.state.grist_transport) as grist:
-        return {"regles": await service.lister(grist, d, cle_schema=qui.document.grist_doc_id)}
+        return {"regles": await service.lister(grist, d, cle_schema=qui.document.grist_doc_id, cle=_cle(request))}
 
 
 @router.post("", status_code=201)
 async def creer(request: Request, qui: Qui, numero: Num, regle: DefinitionRegle) -> dict:
     d = demarche_de(qui, numero)
     _verifier_mode(request, regle)
+    await exiger_proprietaire(request, qui, d)
     try:
         async with qui.grist(request.app.state.grist_transport) as grist:
             rid = await service.enregistrer(client_dn(request, d), grist, d, regle,
-                                            cle_schema=qui.document.grist_doc_id)
+                                            cle_schema=qui.document.grist_doc_id, cle=_cle(request))
     except RegleInvalide as exc:
         raise _erreur(exc) from None
     return {"id": rid}
@@ -68,10 +73,11 @@ async def creer(request: Request, qui: Qui, numero: Num, regle: DefinitionRegle)
 async def modifier(request: Request, qui: Qui, numero: Num, regle_id: Id, regle: DefinitionRegle) -> dict:
     d = demarche_de(qui, numero)
     _verifier_mode(request, regle)
+    await exiger_proprietaire(request, qui, d)
     try:
         async with qui.grist(request.app.state.grist_transport) as grist:
             await service.enregistrer(client_dn(request, d), grist, d, regle,
-                                      cle_schema=qui.document.grist_doc_id, regle_id=regle_id)
+                                      cle_schema=qui.document.grist_doc_id, regle_id=regle_id, cle=_cle(request))
     except RegleInvalide as exc:
         raise _erreur(exc) from None
     return {"id": regle_id}
@@ -80,6 +86,7 @@ async def modifier(request: Request, qui: Qui, numero: Num, regle_id: Id, regle:
 @router.delete("/{regle_id}")
 async def supprimer(request: Request, qui: Qui, numero: Num, regle_id: Id) -> dict:
     d = demarche_de(qui, numero)
+    await exiger_proprietaire(request, qui, d)
     try:
         async with qui.grist(request.app.state.grist_transport) as grist:
             await service.supprimer(grist, d, regle_id)
@@ -105,10 +112,12 @@ async def simuler(request: Request, qui: Qui, numero: Num, regle: DefinitionRegl
 @router.post("/{regle_id}/appliquer")
 async def appliquer(request: Request, qui: Qui, numero: Num, regle_id: Id) -> dict:
     d = demarche_de(qui, numero)
+    droits = await exiger_proprietaire(request, qui, d)
     try:
         async with qui.grist(request.app.state.grist_transport) as grist:
             bilan = await service.appliquer(client_dn(request, d), grist, d, regle_id,
-                                            cle_schema=qui.document.grist_doc_id)
+                                            cle_schema=qui.document.grist_doc_id, cle=_cle(request),
+                                            auteur=droits.identite.email)
     except RegleInvalide as exc:
         raise _erreur(exc) from None
     if bilan is None:

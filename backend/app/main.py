@@ -19,7 +19,10 @@ from .api.routes import router
 from .api.sync_routes import router as sync_router
 from .config import AppConfig, get_config, read_secret
 from .dn.client import DNClient, DNError
+from .droits import CacheGroupes
 from .grist.client import GristError
+from .identite import Identification
+from .regles.service import cle_regles
 from .security import LimiteurDebit, VerificateurJetons
 from .sync.jobs import Taches
 
@@ -88,6 +91,9 @@ def create_app(
     app.state.dn_clients = fabrique
     app.state.grist_transport = grist_transport
     app.state.taches = Taches()
+    app.state.identification = Identification(config, transport=grist_transport)
+    app.state.groupes = CacheGroupes()
+    app.state.cle_regles = cle_regles(read_secret(config.grist_service_key))
 
     if hosts := os.getenv("LBL_ALLOWED_HOSTS"):
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=[h.strip() for h in hosts.split(",")])

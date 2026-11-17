@@ -116,3 +116,28 @@ async def test_vidange_automatique_par_anciennete():
     assert await vidange_automatique(g, D, 30, cle_schema="doc", maintenant=now) == 2
     restant = sorted((r["dossier_number"], r["statut"]) for r in g.rows("LBL_Operations"))
     assert restant == [("3", "en_attente"), ("4", "applique"), ("5", "en_attente")]
+
+
+@pytest.mark.anyio
+async def test_hors_groupes_refuse_et_journalise():
+    g, dn = setup()
+    dn.groupe_de = {2: 394761}
+    a = await apercu(dn, D, Action.AJOUTER, "LA", [2, 4], frozenset({394762}))
+    assert (a["a_faire"], a["hors_perimetre"], a["numeros_hors_perimetre"]) == (1, 1, [2])
+    b = await executer(dn, g, D, Action.AJOUTER, "LA", [2, 4], source="manuel", cle_schema="doc",
+                       perimetre=frozenset({394762}), auteur="camille@agriculture.gouv.fr")
+    assert (b.appliques, b.hors_perimetre) == (1, 1)
+    assert "LA" not in dn.etat[2]
+    j = journal(g)
+    assert j["2"]["statut"] == "refuse" and "groupes" in j["2"]["message"]
+    assert j["4"]["auteur"] == "camille@agriculture.gouv.fr"
+
+
+@pytest.mark.anyio
+async def test_file_hors_groupes_reste_en_attente():
+    g, dn = setup()
+    dn.groupe_de = {2: 394761}
+    await mettre_en_file(dn, g, D, Action.AJOUTER, "LA", [2, 4], source="manuel", cle_schema="doc", auteur="a@b.fr")
+    await envoyer_file(dn, g, D, cle_schema="doc", perimetre=frozenset({394762}))
+    j = journal(g)
+    assert j["2"]["statut"] == "en_attente" and j["4"]["statut"] == "applique"

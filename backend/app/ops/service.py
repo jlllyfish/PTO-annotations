@@ -25,6 +25,7 @@ from ..sync.service import champs_otp, ids_actuels, lignes_grist
 
 JOURNAL = "LBL_Operations"
 MAX_FILE = 2000
+MSG_HORS = "Hors de vos groupes instructeurs"
 
 
 class LabelInconnu(ValueError):
@@ -38,6 +39,7 @@ class BilanOps:
     appliques: int = 0
     deja: int = 0
     introuvables: int = 0
+    hors_perimetre: int = 0
     erreurs: int = 0
     en_file: int = 0
     grist_maj: int = 0
@@ -69,21 +71,30 @@ def _vue_label(l: Label) -> dict[str, str]:
     return {"id": l.id, "nom": l.nom, "couleur": l.couleur}
 
 
-async def apercu(dn: DNClient, d: DemarcheConfig, action: Action, label_id: str, numeros: Sequence[int]) -> dict:
+def _hors(dossier, perimetre: frozenset[int] | None) -> bool:
+    return perimetre is not None and dossier.groupe not in perimetre
+
+
+async def apercu(dn: DNClient, d: DemarcheConfig, action: Action, label_id: str, numeros: Sequence[int],
+                 perimetre: frozenset[int] | None = None) -> dict:
     """Ce qui se passerait, d'après l'état ACTUEL dans DN (pas celui de Grist, qui peut être en retard)."""
     _, label = await _label(dn, d, label_id)
+    numeros = list(dict.fromkeys(numeros))
     trouves = {x.numero: x for x in await dn.dossiers(numeros, d.numero)}
-    a_faire = [n for n in numeros if n in trouves and _besoin(trouves[n].labels, action, label_id)]
+    hors = [n for n in numeros if n in trouves and _hors(trouves[n], perimetre)]
+    a_faire = [n for n in numeros if n in trouves and n not in hors and _besoin(trouves[n].labels, action, label_id)]
     introuvables = [n for n in numeros if n not in trouves]
     return {
         "action": action.value,
         "label": _vue_label(label),
         "total": len(numeros),
         "a_faire": len(a_faire),
-        "deja": len(trouves) - len(a_faire),
+        "deja": len(trouves) - len(a_faire) - len(hors),
         "introuvables": len(introuvables),
+        "hors_perimetre": len(hors),
         "numeros_a_faire": a_faire,  # ≤ 500 (taille max d'une demande)
         "numeros_introuvables": introuvables[:50],
+        "numeros_hors_perimetre": hors[:50],
     }
 
 
@@ -116,8 +127,14 @@ async def executer(
     source: str,
     cle_schema: str,
     lignes_file: dict[int, list[int]] | None = None,
+    perimetre: frozenset[int] | None = None,
+    auteur: str = "",
 ) -> BilanOps:
-    """Envoie à DN. `lignes_file` : {numéro: [ids LBL_Operations]} quand on traite la file d'attente."""
+    """Envoie à DN. `lignes_file` : {numéro: [ids LBL_Operations]} quand on traite la file d'attente.
+
+    `perimetre` : groupes instructeurs autorisés (None = tous). Hors périmètre : refusé dans le journal ;
+    en file d'attente, la ligne reste en attente (une personne habilitée pourra l'envoyer).
+    """
     await assurer_schema(grist, cle_schema)
     await verifier_table_otp(grist, d.table)
     catalogue, label = await _label(dn, d, label_id)
@@ -133,6 +150,9 @@ async def executer(
         if dossier is None:
             resultats[n] = ("erreur", "Dossier introuvable dans cette démarche")
             bilan.introuvables += 1
+        elif _hors(dossier, perimetre):
+            resultats[n] = ("refuse", MSG_HORS)
+            bilan.hors_perimetre += 1
         elif not _besoin(dossier.labels, action, label_id):
             resultats[n] = ("deja_applique", None)
             etats[n] = dossier.labels
@@ -156,14 +176,14 @@ async def executer(
         await grist.ajouter(JOURNAL, [
             {"demarche": d.numero, "dossier_number": str(n), "label_id": label_id, "label": label.nom,
              "action": action.value, "source": source, "statut": st, "message": msg or "",
-             "cree_le": now, "traite_le": now}
+             "cree_le": now, "traite_le": now, "auteur": auteur}
             for n, (st, msg) in resultats.items()
         ])
     else:
-        await grist.maj(JOURNAL, [
-            {"id": rid, "fields": {"statut": st, "message": msg or "", "traite_le": now}}
-            for n, (st, msg) in resultats.items() for rid in lignes_file.get(n, [])
-        ])
+        maj = [{"id": rid, "fields": {"statut": st, "message": msg or "", "traite_le": now}}
+               for n, (st, msg) in resultats.items() if st != "refuse" for rid in lignes_file.get(n, [])]
+        if maj:
+            await grist.maj(JOURNAL, maj)
     for n, (st, msg) in resultats.items():
         bilan.ajouter_detail(n, st, msg)
         bilan.statuts[n] = st
@@ -171,21 +191,26 @@ async def executer(
 
 
 async def mettre_en_file(dn: DNClient, grist: GristClient, d: DemarcheConfig, action: Action, label_id: str,
-                         numeros: Sequence[int], *, source: str, cle_schema: str) -> BilanOps:
+                         numeros: Sequence[int], *, source: str, cle_schema: str, auteur: str = "") -> BilanOps:
     await assurer_schema(grist, cle_schema)
     _, label = await _label(dn, d, label_id)
     numeros = list(dict.fromkeys(numeros))
     now = time.time()
     await grist.ajouter(JOURNAL, [
         {"demarche": d.numero, "dossier_number": str(n), "label_id": label_id, "label": label.nom,
-         "action": action.value, "source": source, "statut": "en_attente", "message": "", "cree_le": now}
+         "action": action.value, "source": source, "statut": "en_attente", "message": "", "cree_le": now,
+         "auteur": auteur}
         for n in numeros
     ])
     return BilanOps(action.value, _vue_label(label), en_file=len(numeros))
 
 
-async def envoyer_file(dn: DNClient, grist: GristClient, d: DemarcheConfig, *, cle_schema: str) -> list[BilanOps]:
-    """Envoie les opérations en attente de la démarche, regroupées par (action, label)."""
+async def envoyer_file(dn: DNClient, grist: GristClient, d: DemarcheConfig, *, cle_schema: str,
+                       perimetre: frozenset[int] | None = None, auteur: str = "") -> list[BilanOps]:
+    """Envoie les opérations en attente de la démarche, regroupées par (action, label).
+
+    Hors du périmètre de l'expéditeur, les lignes restent en attente.
+    """
     await assurer_schema(grist, cle_schema)
     rows = await grist.sql(
         f'SELECT id, dossier_number, label_id, action FROM "{JOURNAL}" '  # noqa: S608  # nosec B608 (constante)
@@ -205,7 +230,8 @@ async def envoyer_file(dn: DNClient, grist: GristClient, d: DemarcheConfig, *, c
     for (action, label_id), lignes in groupes.items():
         try:
             bilans.append(await executer(dn, grist, d, Action(action), label_id, list(lignes), source="file",
-                                         cle_schema=cle_schema, lignes_file=lignes))
+                                         cle_schema=cle_schema, lignes_file=lignes, perimetre=perimetre,
+                                         auteur=auteur))
         except LabelInconnu as exc:
             await grist.maj(JOURNAL, [{"id": i, "fields": {"statut": "erreur", "message": str(exc)}}
                                       for ids in lignes.values() for i in ids])

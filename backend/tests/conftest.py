@@ -47,3 +47,29 @@ class Recorder:
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+class IdentificationFixe:
+    """Remplace la sonde Grist dans les tests de routes."""
+
+    def __init__(self, identite):
+        self.identite = identite
+
+    async def identifier(self, qui, client_utilisateur=None):
+        return self.identite
+
+
+class GroupesFixes:
+    def __init__(self, groupes):
+        self.liste = groupes
+
+    async def groupes(self, dn, d):
+        return self.liste
+
+
+def installer_droits(app, *, email="camille@agriculture.gouv.fr", role="owners", groupes=(394762,)):
+    from app.dn.client import GroupeInstructeur
+    from app.identite import Identite
+    app.state.identification = IdentificationFixe(Identite(email, 2949, "Camille", role) if email else None)
+    app.state.groupes = GroupesFixes([GroupeInstructeur(g, f"Groupe {g}", False, frozenset({email or ""}))
+                                      for g in groupes])

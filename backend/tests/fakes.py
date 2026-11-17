@@ -14,6 +14,10 @@ class FakeGrist:
         self.db = sqlite3.connect(":memory:")
         self.db.row_factory = sqlite3.Row
         self.types: dict[str, dict[str, str]] = {}
+        self.meta: dict[str, dict[str, dict]] = {}   # métadonnées de formule par table / colonne
+        self._col_ref = 0
+        # Utilisateur au nom duquel les écritures sont faites (formules déclenchées user.*)
+        self.utilisateur = {"Email": "camille@agriculture.gouv.fr", "UserID": 2949, "Access": "owners", "Name": "Camille"}
         self.ecritures: list[tuple[str, str, int]] = []  # (méthode, table, nb lignes)
 
     async def __aenter__(self):
@@ -35,6 +39,7 @@ class FakeGrist:
             self.db.execute(f'INSERT INTO "{table}" ({noms}) VALUES ({", ".join("?" * len(l))})', list(l.values()))
 
     def _create(self, table, cols):
+        cols = [(c, t if isinstance(t, str) else t.get("type", "Any")) for c, t in cols]
         self.types[table] = dict(cols)
         defs = ", ".join(f'"{c}"' for c, _ in cols)
         self.db.execute(f'CREATE TABLE "{table}" (id INTEGER PRIMARY KEY, {defs})')
@@ -50,7 +55,8 @@ class FakeGrist:
         if table not in self.types:
             raise GristError("Table not found", status=404)
         choix = getattr(self, "choix", {}).get(table, {})
-        return [Colonne(c, t, c, tuple(choix.get(c, ()))) for c, t in self.types[table].items()]
+        meta = self.meta.get(table, {})
+        return [Colonne(c, t, c, tuple(choix.get(c, ())), dict(meta.get(c, {}))) for c, t in self.types[table].items()]
 
     async def sql(self, sql, args=()):
         assert sql.lstrip().upper().startswith("SELECT")
@@ -59,11 +65,44 @@ class FakeGrist:
     async def creer_table(self, table, colonnes):
         ident(table)
         self._create(table, list(colonnes))
+        self._noter_meta(table, colonnes)
+
+    def _noter_meta(self, table, colonnes):
+        for c, t in colonnes:
+            self._col_ref += 1
+            champs = t if isinstance(t, dict) else {"type": t}
+            self.meta.setdefault(table, {})[c] = {
+                "formula": champs.get("formula", ""), "isFormula": champs.get("isFormula", False),
+                "recalcWhen": champs.get("recalcWhen", 0), "recalcDeps": None, "colRef": self._col_ref}
+
+    async def maj_colonnes(self, table, colonnes):
+        for c in colonnes:
+            self.meta[table][c["id"]].update({k: v for k, v in c["fields"].items() if k != "type"})
+        self.ecritures.append(("maj_colonnes", table, len(colonnes)))
+
+    async def membres(self):
+        return getattr(self, "liste_membres", [
+            {"id": 2949, "email": "Camille@agriculture.gouv.fr", "access": "owners", "parentAccess": None},
+            {"id": 3000, "email": "dominique@agriculture.gouv.fr", "access": "editors", "parentAccess": None}])
 
     async def ajouter_colonnes(self, table, colonnes):
         for c, t in colonnes:
             self.db.execute(f'ALTER TABLE "{table}" ADD COLUMN "{c}"')
-            self.types[table][c] = t
+            self.types[table][c] = t if isinstance(t, str) else t.get("type", "Any")
+        self._noter_meta(table, colonnes)
+
+    def _triggers(self, table, ligne):
+        """Simule les formules déclenchées : user.X → utilisateur courant ; autre formule → constante."""
+        out = dict(ligne)
+        for c, m in self.meta.get(table, {}).items():
+            if not m.get("formula") or m.get("isFormula"):
+                continue
+            auto_dep = m.get("recalcDeps") == ["L", m["colRef"]]
+            if c in ligne and not auto_dep:
+                continue  # valeur fournie conservée (pas de dépendance à soi-même)
+            f = m["formula"]
+            out[c] = self.utilisateur.get(f[5:]) if f.startswith("user.") else f.strip('"')
+        return out
 
     async def upsert(self, table, lignes, cles):
         for l in lignes:
@@ -79,6 +118,9 @@ class FakeGrist:
         return len(lignes)
 
     async def ajouter(self, table, lignes):
+        if getattr(self, "lecture_seule", False):
+            raise GristError("No write access", status=403)
+        lignes = [self._triggers(table, l) for l in lignes]
         for l in lignes:
             cols = ", ".join(f'"{k}"' for k in l)
             self.db.execute(f'INSERT INTO "{table}" ({cols}) VALUES ({", ".join("?" * len(l))})', list(l.values()))
@@ -114,7 +156,8 @@ class FakeDN:
         self.erreur: Exception | None = None
 
     def _d(self, n):
-        return DossierLabels(n, f"D{n}", frozenset(self.etat[n]))
+        groupe = getattr(self, "groupe_de", {}).get(n, 394762)
+        return DossierLabels(n, f"D{n}", frozenset(self.etat[n]), groupe=groupe)
 
     async def catalogue(self, demarche):
         if self.erreur:

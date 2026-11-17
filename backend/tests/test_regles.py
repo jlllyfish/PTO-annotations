@@ -195,3 +195,23 @@ async def test_valeurs_proposees():
         await valeurs_proposees(g, D, champs, "a.relance")        # booléen : rien à proposer
     with pytest.raises(RegleInvalide):
         await valeurs_proposees(g, D, champs, 'c.x"; DROP')
+
+
+@pytest.mark.anyio
+async def test_regle_modifiee_dans_grist_non_executee():
+    g = document()
+    dn = FakeDN({1: {"LA"}, 2: set(), 3: {"LU"}, 4: set()})
+    cle = service.cle_regles("secret")
+    r = regle([("d.state", "egal", "en_construction")], mode="auto")
+    rid = await service.enregistrer(dn, g, D, r, cle_schema="doc", cle=cle)
+    assert (await service.lister(g, D, cle_schema="doc", cle=cle))[0]["erreur"] is None
+    # un éditeur élargit la règle directement dans la table
+    await g.maj("LBL_Regles", [{"id": rid, "fields": {"conditions": json.dumps([[
+        {"champ": "d.state", "operateur": "egal", "valeur": "accepte"}]])}}])
+    assert (await service.lister(g, D, cle_schema="doc", cle=cle))[0]["erreur"] == service.MSG_SIGNATURE
+    res = await service.appliquer_regles_auto(dn, g, D, cle_schema="doc", cle=cle)
+    assert "erreur" in res[0] and dn.etat[3] == {"LU"}
+    # un propriétaire la réenregistre : elle repart
+    await service.enregistrer(dn, g, D, r, cle_schema="doc", cle=cle, regle_id=rid)
+    res = await service.appliquer_regles_auto(dn, g, D, cle_schema="doc", cle=cle)
+    assert res[0]["bilan"]["appliques"] == 2

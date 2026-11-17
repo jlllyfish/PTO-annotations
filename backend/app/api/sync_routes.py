@@ -86,7 +86,8 @@ async def tache_planifiee(
                                                transport=request.app.state.grist_transport) as grist:
                     bilan = await synchroniser(dn, grist, d, Mode(mode), cle_schema=doc.grist_doc_id, progression=prog)
                     if cfg.regles_auto_autorisees:
-                        bilan.regles = await appliquer_regles_auto(dn, grist, d, cle_schema=doc.grist_doc_id)
+                        bilan.regles = await appliquer_regles_auto(dn, grist, d, cle_schema=doc.grist_doc_id,
+                                                                   cle=request.app.state.cle_regles)
                     bilan.journal_purge = await vidange_automatique(
                         grist, d, cfg.journal_retention_jours, cle_schema=doc.grist_doc_id)
                     return bilan

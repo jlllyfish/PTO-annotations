@@ -217,3 +217,8 @@ button.fr-tag.lbl-c--yellow-tournesol[aria-pressed=true]:not(:disabled) { backgr
 /* Cadre complet des tableaux : le DSFR ne trace que le côté droit et le bas de chaque cellule,
    il manquait donc le filet gauche de la première colonne et le filet du haut. */
 .fr-table--bordered .fr-table__content table { border-top: 1px solid #929292; border-left: 1px solid #929292; }
+
+/* Identité certifiée et groupes instructeurs */
+.lbl-droits { display: flex; align-items: center; gap: 0.5rem 1rem; flex-wrap: wrap;
+  padding: 0.5rem 1.5rem; background: var(--background-alt-grey); border-bottom: 1px solid var(--border-default-grey); }
+.lbl-auteur { word-break: break-all; font-size: 0.875rem; }
