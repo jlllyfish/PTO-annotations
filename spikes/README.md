@@ -30,6 +30,12 @@ cp .env.example .env   # puis remplir .env
 | 7 | `python grist_02_upsert.py --ecrire` | Grist (table temporaire supprimée) | Upsert `PUT /records` + `require` en masse, sans doublon |
 | 8 | Récepteur (ci-dessous) | non | Notifications DN sur labels, webhooks Grist, `getAccessToken` |
 
+| A1 | `python ann_01_catalogue.py` | non | Annotations de la démarche (id, type, options), `instructeurId` lisibles, id stables d'un dossier à l'autre |
+| A2 | `python ann_02_mutations.py --ecrire` | DN (restauré) | `dossierModifierAnnotations` : id accepté, lots par alias, dates modifiées (détection de conflit), erreurs, texte vide |
+
+Pour A2 : choisir de préférence des annotations **texte** ou **case à cocher** de test (après A1, recopier leurs id dans
+`DN_TEST_ANNOTATION_IDS`) et renseigner `DN_TEST_INSTRUCTEUR_EMAIL`. Le script remet les valeurs initiales, même s'il est interrompu.
+
 Après l'étape 1, recopier 2 ou 3 `labelId` dans `DN_TEST_LABEL_IDS`.
 Les scripts qui écrivent n'agissent que sur `DN_TEST_DOSSIERS` / `DN_TEST_LABEL_IDS` et
 remettent l'état initial ; ils exigent un drapeau explicite (`--ecrire`, `--rafale`).

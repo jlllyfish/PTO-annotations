@@ -1,4 +1,7 @@
-# PTO-labels — labels Démarche Numérique ↔ Grist
+# PTO-annotations — labels et annotations privées Démarche Numérique ↔ Grist
+
+Variante de [PTO-labels](https://github.com/jlllyfish/PTO-labels) qui ajoute l'**envoi manuel de colonnes Grist
+vers les annotations privées DN** (onglet « Annotations » du widget, en cours — voir `spikes/` : tests ANN).
 
 Gérer les labels des dossiers **Démarche Numérique** depuis un document **Grist** synchronisé par
 [OTP](https://github.com/betagouv/OTP-DS-to-Grist) : widget DSFR, ajout/retrait unitaire ou en masse,
