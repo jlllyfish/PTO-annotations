@@ -1,4 +1,4 @@
-"""Tables propres à l'outil (préfixe LBL_), créées ou complétées si besoin.
+"""Tables propres à l'outil (préfixes LBL_ et ANN_), créées ou complétées si besoin.
 
 On ne modifie jamais le schéma des tables d'OTP : on y met seulement à jour
 `label_names` / `labels_json`, au format exact d'OTP.
@@ -50,6 +50,15 @@ TABLES: dict[str, list[tuple[str, str | dict[str, Any]]]] = {
     # Groupe instructeur de chaque dossier (lu dans DN à la synchro) : OTP ne le met pas dans la table des dossiers
     "LBL_Groupes_Dossiers": [("demarche", "Int"), ("dossier_number", "Text"), ("groupe", "Int"),
                              ("groupe_libelle", "Text")],
+    # Annotations privées : colonne Grist source de chaque annotation DN (une ligne par annotation alimentée)
+    "ANN_Correspondances": [("demarche", "Int"), ("annotation_id", "Text"), ("annotation", "Text"), ("type", "Text"),
+                            ("source", "Text"), ("modifie_le", DT), ("auteur", "Text")],
+    # File d'attente ET journal des envois d'annotations : une ligne par (dossier, annotation)
+    "ANN_Operations": [
+        ("demarche", "Int"), ("dossier_number", "Text"), ("annotation_id", "Text"), ("annotation", "Text"),
+        ("valeur", "Text"), ("source", "Text"), ("statut", "Text"), ("message", "Text"), ("ecraser", "Bool"),
+        ("cree_le", DT), ("traite_le", DT), ("auteur", "Text"),
+    ],
     # Sondes d'identité (une ligne éphémère par vérification ; supprimée aussitôt lue)
     "LBL_Sessions": [("jeton", "Text"), ("cree_le", DT)] + [(c, _trigger(f)) for c, f in TRIGGERS_SESSIONS.items()],
 }

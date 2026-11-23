@@ -69,6 +69,10 @@ class GroupeInstructeur:
     libelle: str
     ferme: bool
     emails: frozenset[str]  # en minuscules
+    ids: tuple[tuple[str, str], ...] = ()  # (email en minuscules, identifiant DN de l'instructeur)
+
+    def instructeur_id(self, email: str) -> str | None:
+        return next((i for e, i in self.ids if e == email.strip().lower()), None)
 
 
 class Action(StrEnum):
@@ -108,7 +112,7 @@ _DEJA = {
 
 Q_GROUPES = """
 query Groupes($n: Int!) {
-  demarche(number: $n) { groupeInstructeurs { number label closed instructeurs { email } } }
+  demarche(number: $n) { groupeInstructeurs { number label closed instructeurs { id email } } }
 }
 """
 Q_CATALOGUE = """
@@ -265,7 +269,9 @@ class DNClient:
         data = await self._data(Q_GROUPES, {"n": demarche})
         return [
             GroupeInstructeur(int(g["number"]), g.get("label") or "", bool(g.get("closed")),
-                              frozenset(str(i.get("email") or "").strip().lower() for i in g.get("instructeurs") or []))
+                              frozenset(str(i.get("email") or "").strip().lower() for i in g.get("instructeurs") or []),
+                              tuple((str(i.get("email") or "").strip().lower(), str(i["id"]))
+                                    for i in g.get("instructeurs") or [] if i.get("id")))
             for g in (data.get("demarche") or {}).get("groupeInstructeurs") or []
         ]
 

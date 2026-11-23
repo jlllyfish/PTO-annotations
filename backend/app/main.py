@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .api.annotations_routes import router as annotations_router
 from .api.ops_routes import router as ops_router
 from .api.regles_routes import router as regles_router
 from .api.routes import router
@@ -140,5 +141,6 @@ def create_app(
     app.include_router(sync_router)
     app.include_router(ops_router)
     app.include_router(regles_router)
+    app.include_router(annotations_router)
     app.mount("/widget", StaticFiles(directory=STATIC, html=True), name="widget")
     return app
