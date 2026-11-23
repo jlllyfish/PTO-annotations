@@ -23,17 +23,27 @@ from datetime import datetime, timedelta, timezone
 from common import DN, env, env_int, env_list, require_flag, save_result
 from dn_annotations import Q_CATALOGUE, Q_DEPUIS, annotation, envoyer_lot, get_dossier
 
-CLES = {"TextChampDescriptor": "text", "TextareaChampDescriptor": "textarea", "CheckboxChampDescriptor": "checkbox"}
+CLES = {"TextChampDescriptor": "text", "TextareaChampDescriptor": "textarea", "CheckboxChampDescriptor": "checkbox",
+        "DropDownListChampDescriptor": "dropDownList"}
+OPTIONS: dict[str, list[str]] = {}  # options des listes déroulantes, par id de descripteur
 FAUX_ID = "Q2hhbXAtOTk5OTk5OTk5"  # « Champ-999999999 », n'existe pas
 SIZES = [1, 5, 10, 25, 50]
 
 
 def valeur_actuelle(a: dict, cle: str):
-    return bool(a.get("coche")) if cle == "checkbox" else (a.get("texte") or "")
+    if cle == "checkbox":
+        return bool(a.get("coche"))
+    if cle == "dropDownList":
+        return a.get("choix") or ""
+    return a.get("texte") or ""
 
 
 def valeur_test(a: dict, cle: str, marque: str):
-    return not bool(a.get("coche")) if cle == "checkbox" else f"{valeur_actuelle(a, cle)} [{marque}]".strip()
+    if cle == "checkbox":
+        return not bool(a.get("coche"))
+    if cle == "dropDownList":
+        return next(o for o in OPTIONS[a["champDescriptorId"]] if o != valeur_actuelle(a, cle))
+    return f"{valeur_actuelle(a, cle)} [{marque}]".strip()
 
 
 async def main() -> None:
@@ -52,23 +62,31 @@ async def main() -> None:
             raise SystemExit(f"Catalogue illisible : {cat.errors}")
         d = cat.data["demarche"]
         types = {a["id"]: a["__typename"] for a in d["activeRevision"]["annotationDescriptors"]}
+        OPTIONS.update({a["id"]: a.get("options") or [] for a in d["activeRevision"]["annotationDescriptors"]})
         instr = {i["email"].lower(): i["id"] for g in d["groupeInstructeurs"] for i in g["instructeurs"]}
         if email not in instr:
             raise SystemExit("DN_TEST_INSTRUCTEUR_EMAIL n'est instructeur d'aucun groupe de la démarche")
         instructeur_id = instr[email]
 
         dossiers = [await get_dossier(dn, n) for n in numeros]
+        for ident in ids_ann:
+            if CLES.get(types.get(ident, "")) is None:
+                raise SystemExit(f"Annotation {ident} : type {types.get(ident)} non testé "
+                                 "(texte, zone de texte, case à cocher ou liste déroulante)")
         cibles = []  # (dossier, champ_id, descripteur_id, clé)
+        absentes = []  # (dossier, descripteur_id) : annotation de la démarche absente du dossier
         for dos in dossiers:
             for ident in ids_ann:
                 a = annotation(dos, ident)
                 if a is None:
-                    raise SystemExit(f"Annotation {ident} absente du dossier {dos['number']}")
-                cle = CLES.get(types.get(a["champDescriptorId"], ""))
-                if cle is None:
-                    raise SystemExit(f"Annotation {a['label']!r} : type {types.get(a['champDescriptorId'])} non testé "
-                                     "(texte, zone de texte ou case à cocher uniquement)")
-                cibles.append((dos, a["id"], a["champDescriptorId"], cle))
+                    absentes.append((dos, ident))
+                    continue
+                cibles.append((dos, a["id"], a["champDescriptorId"], CLES[types[ident]]))
+        if absentes:
+            print(f"⚠️ {len(absentes)} couple(s) (dossier, annotation) absents du dossier : testés à part (étape 9)")
+        dossiers = [dos for dos in dossiers if any(c[0]["id"] == dos["id"] for c in cibles)]
+        if not dossiers:
+            raise SystemExit("Aucun dossier ne porte les annotations choisies")
         initial = {(dos["id"], cid): valeur_actuelle(annotation(dos, cid), cle) for dos, cid, _, cle in cibles}
         print(f"{len(dossiers)} dossier(s), {len(ids_ann)} annotation(s) par dossier, instructeur trouvé")
 
@@ -183,6 +201,13 @@ async def main() -> None:
             print(f"\n7. Texte vide accepté : {ops[0]['ok']} {ops[0]['erreurs'] or ''}")
             out["texte_vide"] = ops[0]
             await restaurer([d0])
+        listes = [c for c in c0 if c[3] == "dropDownList"]
+        if listes:
+            _, cid, _, cle = listes[0]
+            _, ops = await envoyer_lot(dn, [entree(d0["id"], [(cid, cle, "")])])
+            print(f"   Liste déroulante vidée par \"\" : {ops[0]['ok']} {ops[0]['erreurs'] or ''}")
+            out["liste_vide"] = ops[0]
+            await restaurer([d0])
 
         # 8. Instructeur hors groupe
         if email_hors:
@@ -195,8 +220,24 @@ async def main() -> None:
                 out["instructeur_hors_groupe"] = ops[0]
                 await restaurer([d0])
 
+        # 9. Annotation de la démarche absente du dossier (dossier déposé sur une révision antérieure ?)
+        if absentes:
+            dos, ident = absentes[0]
+            cle = CLES[types[ident]]
+            val = OPTIONS[ident][0] if cle == "dropDownList" else (True if cle == "checkbox" else f"[{marque}]")
+            _, ops = await envoyer_lot(dn, [entree(dos["id"], [(ident, cle, val)])])
+            apres = await get_dossier(dn, dos["number"])
+            cree = annotation(apres, ident) is not None
+            print(f"\n9. Écriture sur une annotation absente du dossier {dos['number']} : ok={ops[0]['ok']} "
+                  f"; annotation apparue={cree} {ops[0]['erreurs'] or ''}")
+            out["annotation_absente"] = {"op": ops[0], "apparue": cree}
+            if cree:
+                vide = False if cle == "checkbox" else ""
+                _, ops = await envoyer_lot(dn, [entree(dos["id"], [(ident, cle, vide)])])
+                print(f"   remise à vide : ok={ops[0]['ok']} {ops[0]['erreurs'] or ''}")
+
         # Contrôle final
-        final = [await get_dossier(dn, n) for n in numeros]
+        final = [await get_dossier(dn, dos["number"]) for dos in dossiers]
         restaure = all(valeur_actuelle(annotation(f, cid), cle) == initial[(f["id"], cid)]
                        for f in final for dd, cid, _, cle in cibles if dd["id"] == f["id"])
         print(f"\nRetour à l'état initial : {'OK ✅' if restaure else 'À VÉRIFIER ⚠️'}")
