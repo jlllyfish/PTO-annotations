@@ -1,7 +1,7 @@
 # PTO-annotations — labels et annotations privées Démarche Numérique ↔ Grist
 
 Variante de [PTO-labels](https://github.com/jlllyfish/PTO-labels) qui ajoute l'**envoi manuel de colonnes Grist
-vers les annotations privées DN** (onglet « Annotations » du widget, en cours — voir `spikes/` : tests ANN).
+vers les annotations privées DN** (onglet « Annotations » du widget).
 
 Gérer les labels des dossiers **Démarche Numérique** depuis un document **Grist** synchronisé par
 [OTP](https://github.com/betagouv/OTP-DS-to-Grist) : widget DSFR, ajout/retrait unitaire ou en masse,
@@ -135,3 +135,28 @@ La CI GitHub (`.github/workflows/ci.yml`) lance les quatre à chaque push.
   `grist-plugin-api.js`), `frame-ancestors` limité à l'instance Grist, HSTS, `nosniff`, `no-referrer`.
 - **Garde-fous** : taille de requête bornée, limitation de débit par document, concurrence DN bornée
   avec nouvelles tentatives sur 429/5xx, conteneur non root en lecture seule.
+
+## Annotations privées (onglet « Annotations »)
+
+Envoi **manuel** de colonnes Grist vers les annotations privées DN, au nom de l'instructeur connecté.
+
+- **Correspondances** (propriétaires du document) : pour chaque annotation de la démarche, la colonne Grist qui
+  l'alimente (table des dossiers, des champs ou des annotations d'OTP). Types contrôlés ; listes déroulantes :
+  choix inconnus de DN signalés. Table `ANN_Correspondances`.
+- **Ce dossier** : valeur Grist et valeur DN actuelle côte à côte, statut par annotation, envoi.
+- **En masse** : sur la sélection de l'onglet Dossiers (sinon les dossiers filtrés), 500 au plus ; aperçu d'après
+  l'état réel de DN ; confirmation obligatoire ; ou mise en file.
+- **Journal** : table `ANN_Operations` (une ligne par dossier et annotation), envoi de la file.
+
+Règles appliquées : valeur **vide** dans Grist → ignorée ; **identique** → rien n'est envoyé ; annotation
+**absente du dossier** (dossier déposé avant son ajout) → signalée, rien n'est envoyé (DN répondrait « ok » sans
+écrire) ; valeur DN différente de la **copie OTP** → « modifiée dans DN depuis la synchro » : bloquée, sauf
+« écraser ». Après l'envoi, DN est relu pour constater ce qui a été écrit, et la copie OTP est mise à jour.
+Le jeton DN doit pouvoir modifier les annotations ; l'utilisateur doit être instructeur de la démarche dans DN.
+
+| Route | Rôle |
+|---|---|
+| `GET/PUT /api/demarches/{n}/annotations/correspondances` | lecture (catalogue, sources, compatibilité) / enregistrement |
+| `POST /api/demarches/{n}/annotations/apercu` `{"numeros", "annotation_ids"}` | statut de chaque annotation, d'après DN |
+| `POST /api/demarches/{n}/annotations/envoyer` `{"numeros", "annotation_ids", "ecraser_tout", "ecraser", "envoyer"}` | envoi immédiat ou mise en file |
+| `POST /api/demarches/{n}/annotations/file/envoyer` | envoi des annotations en attente |

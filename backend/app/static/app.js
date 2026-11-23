@@ -125,6 +125,9 @@ const S = {
   modal: null,            // {type: "masse" | "retrait", …}
   ajoutPour: null,        // n° de dossier dont le menu « Ajouter un label » est ouvert
   R: { schema: null, regles: [], edition: null, simulation: null, erreur: null, valeurs: {} },
+  // Onglet Annotations : correspondances (serveur), brouillon des choix, aperçu d'un dossier, envoi en masse
+  A: { vue: "dossier", corr: null, brouillon: {}, numero: "", dossier: null, journal: [],
+    masse: { ids: null, apercu: null, ecraser: false, coche: false } },
   T: {
     page: 1, recherche: "", etat: "", label: "", groupe: null, tri: { col: "__num", sens: "desc" },
     colonnes: [], colonnesDoc: [], colonnesPerso: null, brouillon: null, personnaliser: false, selection: new Set(),
@@ -345,7 +348,7 @@ function enTete() {
   else if (der && der.fin) etat = badge(`Synchro ${ilYa(der.fin)}`, "fr-badge--success");
   return h("header", { class: "lbl-header" },
     h("div", { class: "lbl-header__titre" },
-      h("strong", { text: "Labels DN" }),
+      h("strong", { text: "Labels et annotations DN" }),
       h("span", { class: "lbl-mention", text: S.contexte ? `Document « ${S.contexte.document.nom} »` : "" })),
     h("div", { class: "lbl-header__droite" },
       demarches.length > 1
@@ -353,6 +356,9 @@ function enTete() {
           String(S.demarche), (v) => action(async () => {
             S.demarche = Number(v);
             S.T.selection.clear();
+            S.A = { ...S.A, corr: null, brouillon: {}, numero: "", dossier: null, journal: [],
+              masse: { ids: null, apercu: null, ecraser: false, coche: false } };
+            if (S.onglet === "annotations") await ouvrirAnnotations();
             await chargerDemarche();
           }), { cacher: true })
         : h("span", { class: "lbl-mention", text: demarches[0] ? `${demarches[0].numero} — ${demarches[0].nom}` : "" }),
@@ -370,7 +376,7 @@ function etatSynchroEnCours() {
     text: `Synchronisation (${t.mode}) : ${t.etape} — ${pluriel(t.dossiers_lus, "dossier lu", "dossiers lus")}` });
 }
 
-const ONGLETS = [["dossiers", "Dossiers"], ["file", "File et journal"], ["regles", "Règles"]];
+const ONGLETS = [["dossiers", "Dossiers"], ["annotations", "Annotations"], ["file", "File et journal"], ["regles", "Règles"]];
 
 function onglets() {
   const attente = S.journal.filter((l) => l.statut === "en_attente").length;
@@ -382,6 +388,7 @@ function onglets() {
         S.message = null;
         if (id === "file") action(chargerJournal);
         else if (id === "regles") action(chargerRegles);
+        else if (id === "annotations") action(ouvrirAnnotations);
         else rendu();
       },
     }, nom, id === "file" && attente ? h("span", { class: "lbl-compteur", text: String(attente) }) : null)));
@@ -1253,13 +1260,363 @@ function vueRegles() {
   ];
 }
 
+// ------------------------------------------------------------------ onglet Annotations
+
+// Statuts renvoyés par le serveur pour une annotation d'un dossier
+const STATUTS_ANN = {
+  a_envoyer: ["À envoyer", "fr-badge--info"],
+  identique: ["Identique", "fr-badge--success"],
+  vide: ["Ignorée — vide", ""],
+  conflit: ["Modifiée dans DN", "fr-badge--warning"],
+  absente: ["Absente du dossier", "fr-badge--error"],
+  invalide: ["Valeur refusée", "fr-badge--error"],
+  introuvable: ["Dossier introuvable", "fr-badge--error"],
+  hors_perimetre: ["Hors de vos groupes", "fr-badge--warning"],
+  applique: ["Envoyée", "fr-badge--success"],
+  erreur: ["Erreur", "fr-badge--error"],
+  bloque: ["Bloquée", "fr-badge--warning"],
+  ignore: ["Ignorée", ""],
+};
+const SOUS_VUES_ANN = [["dossier", "Ce dossier"], ["masse", "En masse"], ["corresp", "Correspondances"], ["journal", "Journal"]];
+
+async function chargerCorrespondances(frais = false) {
+  const c = await api("GET", `${base()}/annotations/correspondances${frais ? "?frais=true" : ""}`);
+  S.A.corr = c;
+  S.A.brouillon = Object.fromEntries(c.annotations.map((a) => [a.id, a.source || ""]));
+  if (!S.A.masse.ids) S.A.masse.ids = new Set(c.annotations.filter((a) => a.source).map((a) => a.id));
+}
+
+async function chargerJournalAnn() {
+  S.A.journal = (await lireTable("ANN_Operations", (l) => Number(l.demarche) === S.demarche))
+    .sort((a, b) => (b.cree_le || 0) - (a.cree_le || 0) || b.id - a.id);
+}
+
+async function ouvrirAnnotations() {
+  await Promise.all([chargerCorrespondances(), chargerJournalAnn()]);
+  if (!S.A.numero) {
+    const sel = [...S.T.selection];
+    const nums = numerosTransmis();
+    S.A.numero = String(sel.length === 1 ? sel[0] : nums.length === 1 ? nums[0] : "");
+  }
+}
+
+const annotationsAlimentees = () => (S.A.corr ? S.A.corr.annotations.filter((a) => a.source) : []);
+const sourceDe = (ref) => (S.A.corr ? S.A.corr.sources.find((s) => s.ref === ref) : null);
+const libelleSource = (s) => (s ? `${s.libelle !== s.colonne ? `${s.libelle} (${s.colonne})` : s.colonne}` : "?");
+
+function messageBilanAnn(b) {
+  const ok = [];
+  if (b.appliquees) ok.push(pluriel(b.appliquees, "annotation envoyée", "annotations envoyées"));
+  if (b.en_file) ok.push(`${pluriel(b.en_file, "annotation mise", "annotations mises")} en file d'attente`);
+  if (b.identiques) ok.push(`${b.identiques} déjà identique(s) dans DN`);
+  const ko = [];
+  if (b.bloquees) ko.push(`${pluriel(b.bloquees, "annotation bloquée", "annotations bloquées")} (modifiée dans DN depuis la synchro)`);
+  if (b.erreurs) ko.push(pluriel(b.erreurs, "erreur", "erreurs"));
+  if (b.absentes) ko.push(`${pluriel(b.absentes, "annotation absente", "annotations absentes")} du dossier`);
+  if (b.invalides) ko.push(`${pluriel(b.invalides, "valeur refusée", "valeurs refusées")}`);
+  if (b.introuvables) ko.push(`${b.introuvables} introuvable(s)`);
+  if (b.hors_perimetre) ko.push(`${b.hors_perimetre} hors de vos groupes instructeurs`);
+  const rien = !b.appliquees && !b.en_file;
+  return {
+    type: ko.length ? (rien ? "error" : "warning") : "success",
+    titre: rien && ko.length ? "Aucune annotation envoyée" : "Annotations",
+    texte: [ok.length ? `${ok.join(", ")}.` : "", ko.length ? `${ko.join(", ")} : voir le journal.` : "",
+      ...(b.avertissements || [])].filter(Boolean).join(" ") || "Aucun changement.",
+  };
+}
+
+function segmenteAnn() {
+  const nom = nouvelId("seg");
+  return h("fieldset", { class: "fr-segmented fr-segmented--sm" },
+    h("legend", { class: "fr-segmented__legend lbl-cache", text: "Vue de l'onglet Annotations" }),
+    h("div", { class: "fr-segmented__elements" }, SOUS_VUES_ANN.map(([id, lib]) => {
+      const idInput = nouvelId("segi");
+      return h("div", { class: "fr-segmented__element" },
+        h("input", { type: "radio", id: idInput, name: nom, value: id, checked: S.A.vue === id,
+          onchange: () => {
+            S.A.vue = id;
+            S.message = null;
+            if (id === "journal") action(chargerJournalAnn);
+            else rendu();
+          } }),
+        h("label", { class: "fr-label", for: idInput, text: lib }));
+    })));
+}
+
+function tableau(caption, entetes, lignes) {
+  return h("div", { class: "fr-table fr-table--bordered fr-table--multiline fr-mb-0 lbl-tableau" },
+    h("div", { class: "fr-table__wrapper" }, h("div", { class: "fr-table__container" }, h("div", { class: "fr-table__content" },
+      h("table", {},
+        h("caption", { class: "lbl-cache", text: caption }),
+        h("thead", {}, h("tr", {}, entetes.map((t) => h("th", { scope: "col", text: t })))),
+        h("tbody", {}, lignes))))));
+}
+
+const mentionVide = () => h("span", { class: "lbl-mention", text: "(vide)" });
+
+// --- Ce dossier
+
+async function apercuDossier() {
+  const n = parseInt(S.A.numero, 10);
+  if (!Number.isInteger(n) || n <= 0) throw new Error("Saisissez un numéro de dossier.");
+  S.A.dossier = { numero: n, apercu: null, ecraser: new Set() };
+  S.A.dossier.apercu = await api("POST", `${base()}/annotations/apercu`, { numeros: [n] });
+}
+
+function vueAnnDossier() {
+  const d = S.A.dossier;
+  const idNum = nouvelId("num");
+  const nums = numerosTransmis();
+  const form = h("form", { class: "lbl-actions", onsubmit: (e) => { e.preventDefault(); action(apercuDossier); } },
+    h("div", { class: "fr-input-group fr-mb-0 lbl-champ" },
+      h("label", { class: "fr-label", for: idNum }, "N° de dossier",
+        h("span", { class: "fr-hint-text", text: "Valeurs Grist et valeurs DN actuelles, côte à côte" })),
+      h("input", { class: "fr-input", id: idNum, inputmode: "numeric", value: S.A.numero, list: nums.length <= 500 ? "lbl-nums" : null,
+        oninput: (e) => { S.A.numero = e.target.value.replace(/\D/g, ""); } }),
+      nums.length <= 500 ? h("datalist", { id: "lbl-nums" }, nums.map((n) => h("option", { value: String(n) }))) : null),
+    h("button", { type: "submit", class: "fr-btn fr-btn--secondary lbl-btn lbl-btn--bas", disabled: S.occupe || !peutAgir() },
+      icone("relire"), d ? "Relire DN" : "Afficher"));
+  if (!annotationsAlimentees().length) {
+    return [form, alerte("info", null, "Aucune annotation n'est alimentée depuis Grist : réglez d'abord les correspondances.")];
+  }
+  if (!d || !d.apercu) return [form];
+  const a = d.apercu;
+  const envoyables = a.lignes.filter((l) => l.statut === "a_envoyer" || (l.statut === "conflit" && d.ecraser.has(l.annotation_id)));
+  const lignes = a.lignes.map((l) => h("tr", {},
+    h("td", {}, h("strong", { text: l.annotation }),
+      h("div", { class: "lbl-mention", text: (a.annotations.find((x) => x.id === l.annotation_id) || {}).type || "" })),
+    h("td", { text: libelleSource((a.annotations.find((x) => x.id === l.annotation_id) || {}).source) }),
+    h("td", {}, l.grist ? l.grist : mentionVide()),
+    h("td", {}, l.dn ? l.dn : mentionVide()),
+    h("td", {}, badge(...(STATUTS_ANN[l.statut] || [l.statut, ""])),
+      l.statut === "conflit" ? h("div", { class: "lbl-mention", text: `Valeur à la dernière synchro : ${l.copie || "(vide)"}` }) : null,
+      l.message && l.statut !== "conflit" && l.statut !== "vide" ? h("div", { class: "lbl-mention", text: l.message }) : null,
+      l.statut === "conflit" ? caseLigne("Écraser quand même", d.ecraser.has(l.annotation_id), (c) => {
+        if (c) d.ecraser.add(l.annotation_id); else d.ecraser.delete(l.annotation_id);
+        rendu();
+      }) : null)));
+  const bloquees = a.lignes.filter((l) => l.statut === "conflit" && !d.ecraser.has(l.annotation_id)).length;
+  const envoyer = (file) => action(async () => {
+    const b = await api("POST", `${base()}/annotations/envoyer`, {
+      numeros: [d.numero], envoyer: !file,
+      ecraser: [...d.ecraser].map((id) => ({ numero: d.numero, annotation_id: id })),
+    });
+    S.message = messageBilanAnn(b);
+    await chargerJournalAnn();
+    await apercuDossier();
+  });
+  const u = S.droits && S.droits.utilisateur;
+  return [
+    form,
+    h("div", { class: "lbl-entre lbl-entre--centre" },
+      h("h2", { class: "fr-h5 fr-mb-0", text: `Dossier n° ${d.numero}` }),
+      h("a", { class: "fr-link fr-link--sm", href: `https://demarche.numerique.gouv.fr/procedures/${S.demarche}/dossiers/${d.numero}`,
+        target: "_blank", rel: "noopener noreferrer", title: `Ouvrir le dossier ${d.numero} dans DN (nouvelle fenêtre)` }, "Ouvrir dans DN")),
+    a.avertissements.length ? alerte("warning", null, a.avertissements.join(" ")) : null,
+    a.compte.introuvable ? alerte("error", null, "Dossier introuvable dans cette démarche.") : null,
+    a.compte.hors_perimetre ? alerte("warning", null, "Ce dossier appartient à un groupe instructeur dont vous ne faites pas partie.") : null,
+    tableau(`Annotations du dossier ${d.numero}`, ["Annotation DN", "Colonne Grist", "Valeur Grist (à envoyer)", "Valeur DN actuelle", "Statut"], lignes),
+    u ? alerte("info", null, `Envoi au nom de ${u.email} : la modification apparaîtra sous votre nom dans l'historique DN. Les valeurs vides de Grist ne sont jamais envoyées.`) : null,
+    h("div", { class: "lbl-entre lbl-entre--centre lbl-pied" },
+      h("span", { class: "lbl-mention", text: [pluriel(envoyables.length, "annotation à envoyer", "annotations à envoyer"),
+        bloquees ? `${bloquees} bloquée(s) (modifiée dans DN)` : "",
+        a.compte.invalide + a.compte.absente ? `${a.compte.invalide + a.compte.absente} en erreur` : ""].filter(Boolean).join(" · ") }),
+      h("div", { class: "lbl-actions" },
+        bouton("Mettre en file", () => envoyer(true), { type: "secondary", disabled: !envoyables.length || !peutAgir() }),
+        bouton(`Envoyer ${pluriel(envoyables.length, "annotation", "annotations")} vers DN`, () => envoyer(false),
+          { disabled: !envoyables.length || !peutAgir() }))),
+  ];
+}
+
+// --- En masse
+
+function dossiersMasse() {
+  const sel = [...S.T.selection];
+  if (sel.length) return { numeros: sel, origine: "sélectionnés dans l'onglet Dossiers" };
+  const { lignes } = lignesFiltrees();
+  return { numeros: lignes.filter(actionnable).map((l) => l.num), origine: "transmis par la vue Grist et les filtres de l'onglet Dossiers" };
+}
+
+function vueAnnMasse() {
+  const M = S.A.masse;
+  const { numeros, origine } = dossiersMasse();
+  const alimentees = annotationsAlimentees();
+  if (!alimentees.length) return alerte("info", null, "Aucune annotation n'est alimentée depuis Grist : réglez d'abord les correspondances.");
+  const trop = numeros.length > MAX_LOT;
+  const ids = alimentees.filter((x) => M.ids.has(x.id)).map((x) => x.id);
+  const invalider = () => { M.apercu = null; M.coche = false; };
+  const a = M.apercu;
+  const idConf = nouvelId("conf");
+  const nomConflit = nouvelId("confl");
+  const conflits = a ? a.lignes.filter((l) => l.statut === "conflit") : [];
+  const erreurs = a ? a.lignes.filter((l) => l.statut === "invalide" || l.statut === "absente") : [];
+  const nbEnvoi = a ? a.compte.a_envoyer + (M.ecraser ? a.compte.conflit : 0) : 0;
+  const envoyer = (file) => action(async () => {
+    const b = await api("POST", `${base()}/annotations/envoyer`, { numeros, annotation_ids: ids, ecraser_tout: M.ecraser, envoyer: !file });
+    S.message = messageBilanAnn(b);
+    invalider();
+    await chargerJournalAnn();
+  });
+  const stat = (n, texte, cls) => h("div", { class: `lbl-stat ${cls || ""}` }, h("strong", { text: String(n) }), h("span", { text: texte }));
+  return [
+    h("div", { class: "lbl-grille-masse" },
+      h("section", { class: "lbl-bloc" },
+        h("h2", { class: "fr-h6 fr-mb-1w", text: "1. Dossiers" }),
+        h("p", { class: "fr-mb-0" }, h("strong", { text: pluriel(numeros.length, "dossier", "dossiers") }), ` ${origine}.`),
+        h("p", { class: "lbl-mention fr-mb-0", text: `${MAX_LOT} dossiers au plus par envoi.` }),
+        trop ? alerte("warning", null, `Réduisez la sélection à ${MAX_LOT} dossiers.`) : null),
+      h("fieldset", { class: "fr-fieldset lbl-bloc" },
+        h("legend", { class: "fr-fieldset__legend fr-h6 fr-mb-1w" }, "2. Annotations à envoyer",
+          h("span", { class: "fr-hint-text", text: "Correspondances définies dans la vue « Correspondances »." })),
+        h("div", { class: "fr-fieldset__element lbl-actions" },
+          h("button", { type: "button", class: "fr-link fr-link--sm lbl-lien", onclick: () => { alimentees.forEach((x) => M.ids.add(x.id)); invalider(); rendu(); } }, "Tout sélectionner"),
+          h("button", { type: "button", class: "fr-link fr-link--sm lbl-lien", onclick: () => { M.ids.clear(); invalider(); rendu(); } }, "Tout désélectionner")),
+        h("div", { class: "lbl-grille-cases" }, alimentees.map((x) => {
+          const id = nouvelId("ann");
+          return h("div", { class: "fr-fieldset__element" }, h("div", { class: "fr-checkbox-group" },
+            h("input", { type: "checkbox", id, checked: M.ids.has(x.id),
+              onchange: (e) => { if (e.target.checked) M.ids.add(x.id); else M.ids.delete(x.id); invalider(); rendu(); } }),
+            h("label", { class: "fr-label", for: id }, x.libelle,
+              h("span", { class: "fr-hint-text", text: `Colonne Grist : ${libelleSource(sourceDe(x.source))} · ${x.type}` }))));
+        })))),
+    h("div", { class: "lbl-entre lbl-entre--centre" },
+      h("h2", { class: "fr-h6 fr-mb-0", text: "3. Aperçu, d'après l'état réel de DN" }),
+      bouton(a ? "Recalculer" : "Calculer l'aperçu", () => action(async () => {
+        M.apercu = await api("POST", `${base()}/annotations/apercu`, { numeros, annotation_ids: ids });
+        M.coche = false;
+      }), { type: "secondary", ic: "relire", disabled: !numeros.length || trop || !ids.length || !peutAgir() })),
+    a ? h("div", { class: "lbl-stats lbl-stats--4" },
+      stat(a.compte.a_envoyer, `annotation(s) à envoyer sur ${pluriel(a.dossiers_a_envoyer, "dossier", "dossiers")}`, "lbl-stat--fort"),
+      stat(a.compte.identique, "déjà identiques dans DN"),
+      stat(a.compte.conflit, "modifiées dans DN depuis la synchro", a.compte.conflit ? "lbl-stat--alerte" : ""),
+      stat(a.compte.vide, "ignorées : valeur vide dans Grist")) : null,
+    a && (a.dossiers_introuvables || a.dossiers_hors_perimetre) ? h("p", { class: "lbl-mention", text: [
+      a.dossiers_introuvables ? `${pluriel(a.dossiers_introuvables, "dossier introuvable", "dossiers introuvables")}` : "",
+      a.dossiers_hors_perimetre ? `${a.dossiers_hors_perimetre} hors de vos groupes instructeurs (ignorés)` : ""].filter(Boolean).join(" · ") }) : null,
+    conflits.length ? h("div", { class: "lbl-carte lbl-carte--alerte" },
+      h("h3", { class: "fr-h6 fr-mb-0", text: `${pluriel(conflits.length, "annotation a été modifiée", "annotations ont été modifiées")} dans DN après la dernière synchro` }),
+      tableau("Annotations modifiées dans DN", ["Dossier", "Annotation", "Valeur DN", "Valeur Grist", "À la dernière synchro"],
+        conflits.slice(0, 20).map((l) => h("tr", {}, h("td", { text: String(l.numero) }), h("td", { text: l.annotation }),
+          h("td", { text: l.dn || "(vide)" }), h("td", { text: l.grist }), h("td", { text: l.copie || "(vide)" })))),
+      conflits.length > 20 ? h("p", { class: "lbl-mention", text: `… et ${conflits.length - 20} autre(s).` }) : null,
+      h("fieldset", { class: "fr-fieldset fr-mb-0" },
+        h("legend", { class: "fr-fieldset__legend fr-text--regular", text: "Que faire de ces annotations ?" }),
+        [[false, "Ne pas les envoyer (recommandé)"], [true, "Les écraser avec la valeur Grist"]].map(([v, lib]) => {
+          const id = nouvelId("rad");
+          return h("div", { class: "fr-fieldset__element fr-fieldset__element--inline" }, h("div", { class: "fr-radio-group" },
+            h("input", { type: "radio", id, name: nomConflit, checked: M.ecraser === v, onchange: () => { M.ecraser = v; M.coche = false; rendu(); } }),
+            h("label", { class: "fr-label", for: id, text: lib })));
+        }))) : null,
+    erreurs.length ? h("details", { class: "lbl-details" },
+      h("summary", { text: `${pluriel(erreurs.length, "annotation ne pourra pas être envoyée", "annotations ne pourront pas être envoyées")}` }),
+      tableau("Annotations en erreur", ["Dossier", "Annotation", "Motif"], erreurs.slice(0, 50).map((l) => h("tr", {},
+        h("td", { text: String(l.numero) }), h("td", { text: l.annotation }), h("td", { text: l.message }))))) : null,
+    a ? h("div", { class: "lbl-entre lbl-entre--centre lbl-pied" },
+      h("div", { class: "fr-checkbox-group" },
+        h("input", { type: "checkbox", id: idConf, checked: M.coche, disabled: !nbEnvoi, onchange: (e) => { M.coche = e.target.checked; rendu(); } }),
+        h("label", { class: "fr-label", for: idConf, text: `Je confirme l'envoi de ${pluriel(nbEnvoi, "annotation", "annotations")}` })),
+      h("div", { class: "lbl-actions" },
+        bouton("Mettre en file sans envoyer", () => envoyer(true), { type: "secondary", disabled: !nbEnvoi }),
+        bouton("Envoyer vers DN", () => envoyer(false), { disabled: !nbEnvoi || !M.coche }))) : null,
+  ];
+}
+
+// --- Correspondances
+
+function vueAnnCorresp() {
+  const C = S.A.corr;
+  if (!C) return h("p", { class: "lbl-mention", text: "Chargement…" });
+  const modifiable = C.modifiable;
+  const sources = C.sources.filter((s) => s.origine !== "Annotation (copie OTP)");
+  const origines = [...new Set(sources.map((s) => s.origine))];
+  const change = C.annotations.some((a) => (S.A.brouillon[a.id] || "") !== (a.source || ""));
+  const lignes = C.annotations.map((a) => {
+    const id = nouvelId("src");
+    const choix = S.A.brouillon[a.id] || "";
+    const enregistre = choix === (a.source || "");
+    const compat = enregistre ? a.compatibilite : null;
+    let msg = null;
+    if (!choix) msg = ["info", "Non alimentée depuis Grist."];
+    else if (!enregistre) msg = ["info", "Modification non enregistrée : la compatibilité sera vérifiée à l'enregistrement."];
+    else if (compat) msg = [{ ok: "valid", avertissement: "warning", erreur: "error" }[compat.niveau] || "info", compat.message];
+    const groupeCls = msg && msg[0] === "error" ? " fr-select-group--error" : msg && msg[0] === "valid" ? " fr-select-group--valid" : "";
+    return h("div", { class: "lbl-corresp" },
+      h("div", { class: "lbl-corresp__cible" },
+        h("span", { class: "lbl-corresp__nom", text: a.libelle }),
+        h("span", { class: "fr-hint-text", text: `Annotation DN · ${a.type}${a.options.length ? ` · ${pluriel(a.options.length, "option", "options")}` : ""}` })),
+      h("div", { class: `fr-select-group fr-mb-0${groupeCls}` },
+        h("label", { class: "fr-label lbl-cache", for: id, text: `Colonne Grist pour « ${a.libelle} »` }),
+        h("select", { class: "fr-select", id, disabled: !modifiable || S.occupe, "aria-describedby": `${id}-msg`,
+          onchange: (e) => { S.A.brouillon[a.id] = e.target.value; rendu(); } },
+          h("option", { value: "", selected: !choix, text: "— Ne pas alimenter —" }),
+          origines.map((o) => h("optgroup", { label: o }, sources.filter((s) => s.origine === o).map((s) =>
+            h("option", { value: s.ref, selected: s.ref === choix, text: `${libelleSource(s)} — ${s.type}` }))))),
+        h("div", { class: "fr-messages-group", id: `${id}-msg`, "aria-live": "polite" },
+          msg ? h("p", { class: `fr-message fr-message--${msg[0]}`, text: msg[1] }) : null)));
+  });
+  return [
+    h("div", { class: "lbl-entre" },
+      h("div", {},
+        h("h2", { class: "fr-h5 fr-mb-1v", text: "Alimenter les annotations privées depuis Grist" }),
+        h("p", { class: "lbl-mention fr-mb-0", text: "Pour chaque annotation de la démarche, choisissez la colonne Grist qui la remplit." })),
+      bouton("Relire le catalogue DN", () => action(() => chargerCorrespondances(true)), { type: "tertiary", taille: "sm", ic: "relire" })),
+    modifiable ? null : alerte("info", null, "Les correspondances sont réglées par les propriétaires du document Grist. Vous pouvez les consulter."),
+    h("div", { class: "lbl-corresp lbl-corresp--entete", "aria-hidden": "true" },
+      h("span", { text: "Annotation DN (cible)" }), h("span", { text: "Colonne Grist (source)" })),
+    h("div", { class: "lbl-corresp-liste" }, lignes),
+    C.exclues.length ? h("p", { class: "lbl-mention", text: `Non proposées : ${C.exclues.map((e) => `« ${e.libelle} » (${e.raison})`).join(", ")}.` }) : null,
+    modifiable ? h("div", { class: "lbl-actions lbl-actions--droite lbl-pied" },
+      bouton("Annuler", () => { S.A.brouillon = Object.fromEntries(C.annotations.map((a) => [a.id, a.source || ""])); rendu(); },
+        { type: "secondary", disabled: !change }),
+      bouton("Enregistrer les correspondances", () => action(async () => {
+        const r = await api("PUT", `${base()}/annotations/correspondances`, { correspondances: S.A.brouillon });
+        await chargerCorrespondances();
+        S.A.masse.ids = new Set(annotationsAlimentees().map((x) => x.id));
+        S.A.masse.apercu = null;
+        S.A.dossier = null;
+        S.message = { type: "success", titre: "Correspondances enregistrées", texte: pluriel(r.enregistrees, "annotation alimentée", "annotations alimentées") + " depuis Grist." };
+      }), { disabled: !change })) : null,
+  ];
+}
+
+// --- Journal
+
+function vueAnnJournal() {
+  const attente = S.A.journal.filter((l) => l.statut === "en_attente").length;
+  const lignes = S.A.journal.slice(0, 200);
+  return h("section", { class: "lbl-carte" },
+    h("div", { class: "lbl-actions" },
+      bouton(`Envoyer ${pluriel(attente, "annotation en attente", "annotations en attente")}`, () => action(async () => {
+        const b = await api("POST", `${base()}/annotations/file/envoyer`);
+        S.message = messageBilanAnn(b);
+        await chargerJournalAnn();
+      }), { disabled: !attente || !peutAgir() }),
+      bouton("Actualiser", () => action(chargerJournalAnn), { type: "tertiary", ic: "verifier" })),
+    lignes.length
+      ? tableau("Envois d'annotations", ["Dossier", "Annotation", "Valeur", "Auteur", "Statut", "Date"], lignes.map((l) => h("tr", {},
+        h("td", { text: String(l.dossier_number) }),
+        h("td", { text: l.annotation || l.annotation_id }),
+        h("td", { text: l.valeur || "" }),
+        h("td", { class: "lbl-auteur", text: l.auteur || "—" }),
+        h("td", {}, badge(...(STATUTS_ANN[l.statut] || STATUTS[l.statut] || [l.statut, ""])),
+          l.message ? h("div", { class: "lbl-mention", text: l.message }) : null),
+        h("td", { text: dateEpoch(l.traite_le || l.cree_le) }))))
+      : h("p", { class: "lbl-mention", text: "Aucun envoi d'annotation." }));
+}
+
+function vueAnnotations() {
+  const vues = { dossier: vueAnnDossier, masse: vueAnnMasse, corresp: vueAnnCorresp, journal: vueAnnJournal };
+  if (!S.A.corr) return h("p", { class: "lbl-mention", text: "Chargement des annotations…" });
+  return [segmenteAnn(), vues[S.A.vue]()];
+}
+
 // ------------------------------------------------------------------ rendu
 
 function rendu() {
   const app = document.getElementById("app");
   if (!S.contexte) return;
   compteurIds = 0; // identifiants stables d'un rendu à l'autre (restauration du focus)
-  const vues = { dossiers: vueDossiers, file: vueFile, regles: vueRegles };
+  const vues = { dossiers: vueDossiers, annotations: vueAnnotations, file: vueFile, regles: vueRegles };
   const focus = document.activeElement && document.activeElement.id;
   // replaceChildren écrirait « null » en texte : on ne passe que des nœuds
   app.replaceChildren(...[
